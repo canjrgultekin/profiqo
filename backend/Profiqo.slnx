@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Profiqo.Api/Profiqo.Api.csproj" />
+    <Project Path="src/Profiqo.Application/Profiqo.Application.csproj" />
+    <Project Path="src/Profiqo.Contracts/Profiqo.Contracts.csproj" />
+    <Project Path="src/Profiqo.Domain/Profiqo.Domain.csproj" />
+    <Project Path="src/Profiqo.Infrastructure/Profiqo.Infrastructure.csproj" />
+    <Project Path="src/Profiqo.Worker/Profiqo.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Profiqo.Tests.Integration/Profiqo.Tests.Integration.csproj" />
+    <Project Path="tests/Profiqo.Tests.Unit/Profiqo.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

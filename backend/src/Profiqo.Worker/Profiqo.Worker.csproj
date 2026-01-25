@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Profiqo.Worker-6dcc11ba-79dd-4317-940b-c747a139bdac</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Profiqo.Application\Profiqo.Application.csproj" />
+    <ProjectReference Include="..\Profiqo.Infrastructure\Profiqo.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
