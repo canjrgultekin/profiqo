@@ -51,6 +51,7 @@ public static class DependencyInjection
 
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.IIntegrationJobRepository, Profiqo.Infrastructure.Persistence.Repositories.IntegrationJobRepository>();
 
         return services;
     }

@@ -32,6 +32,7 @@ public sealed class ProfiqoDbContext : DbContext
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
     public DbSet<IngestionEvent> IngestionEvents => Set<IngestionEvent>();
     public DbSet<IntegrationCursor> IntegrationCursors => Set<IntegrationCursor>();
+    public DbSet<IntegrationJob> IntegrationJobs => Set<IntegrationJob>();
 
     public ProfiqoDbContext(DbContextOptions<ProfiqoDbContext> options, ITenantContext tenantContext)
         : base(options)

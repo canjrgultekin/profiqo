@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(RequestLoggingBehavior<,>));
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(UnitOfWorkBehavior<,>));
+        services.AddScoped<Profiqo.Application.Integrations.Ikas.IIkasSyncProcessor, Profiqo.Application.Integrations.Ikas.IkasSyncProcessor>();
 
         return services;
     }
