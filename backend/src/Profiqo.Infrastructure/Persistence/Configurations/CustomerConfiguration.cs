@@ -52,15 +52,25 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             ai.Property(p => p.ComputedAtUtc).HasColumnName("ai_computed_at_utc");
         });
 
+        // Identities - FK tipi düzeltildi
         builder.Navigation(x => x.Identities).UsePropertyAccessMode(PropertyAccessMode.Field);
-
         builder.OwnsMany(x => x.Identities, id =>
         {
             id.ToTable("customer_identities");
-            id.WithOwner().HasForeignKey("customer_id");
 
-            id.Property<Guid>("id");
-            id.HasKey("id");
+            // FK'yı doğru tip ve converter ile tanımla
+            id.Property<CustomerId>("CustomerId")
+                .HasConversion(new StronglyTypedIdConverter<CustomerId>())
+                .HasColumnName("customer_id")
+                .IsRequired();
+
+            id.WithOwner().HasForeignKey("CustomerId");
+
+            id.Property<Guid>("Id")
+                .HasColumnName("id")
+                .ValueGeneratedOnAdd();
+
+            id.HasKey("Id");
 
             id.Property(p => p.TenantId)
                 .HasConversion(new StronglyTypedIdConverter<TenantId>())
@@ -94,25 +104,28 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             id.Property(p => p.LastSeenAtUtc).HasColumnName("last_seen_at_utc").IsRequired();
 
             id.HasIndex(p => new { p.TenantId, p.Type, p.ValueHash }).IsUnique();
-            id.HasIndex("customer_id");
+            id.HasIndex("CustomerId");
         });
 
+        // Consents - FK tipi düzeltildi
         builder.Navigation(x => x.Consents).UsePropertyAccessMode(PropertyAccessMode.Field);
-
         builder.OwnsMany(x => x.Consents, c =>
         {
             c.ToTable("customer_consents");
 
-            // FK'yi typed shadow property ile yönetiyoruz
+            // FK'yı doğru tip ve converter ile tanımla
+            c.Property<CustomerId>("CustomerId")
+                .HasConversion(new StronglyTypedIdConverter<CustomerId>())
+                .HasColumnName("customer_id")
+                .IsRequired();
+
             c.WithOwner().HasForeignKey("CustomerId");
 
-            // Primary key (owned collection)
-            c.Property<Guid>("id");
-            c.HasKey("id");
+            c.Property<Guid>("Id")
+                .HasColumnName("id")
+                .ValueGeneratedOnAdd();
 
-            // Typed shadow props (CLR adı) -> column name
-            c.Property<Guid>("TenantId").HasColumnName("tenant_id").IsRequired();
-            c.Property<Guid>("CustomerId").HasColumnName("customer_id").IsRequired();
+            c.HasKey("Id");
 
             c.Property(p => p.Type).HasConversion<short>().HasColumnName("type").IsRequired();
             c.Property(p => p.Status).HasConversion<short>().HasColumnName("status").IsRequired();
@@ -125,9 +138,8 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
             c.Property(p => p.ChangedAtUtc).HasColumnName("changed_at_utc").IsRequired();
 
-            // Index: property NAME ile (shadow property adı), column name değil
-            c.HasIndex("TenantId", "CustomerId", "Type").IsUnique();
-            c.HasIndex("TenantId", "Type", "Status");
+            c.HasIndex("CustomerId", "Type").IsUnique();
+            c.HasIndex("CustomerId", "Status");
         });
     }
 }

@@ -14,7 +14,10 @@ internal sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.ToTable("tenants");
 
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasConversion(new StronglyTypedIdConverter<TenantId>());
+
+        builder.Property(x => x.Id)
+            .HasConversion(new StronglyTypedIdConverter<TenantId>())
+            .ValueGeneratedNever();
 
         builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Slug).HasMaxLength(80).IsRequired();

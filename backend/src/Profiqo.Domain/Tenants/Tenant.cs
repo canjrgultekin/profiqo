@@ -3,8 +3,6 @@ using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Domain.Tenants;
 
-
-
 public sealed class Tenant : AggregateRoot<TenantId>
 {
     public string Name { get; private set; }

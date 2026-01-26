@@ -5,23 +5,29 @@ namespace Profiqo.Domain.Users;
 
 public sealed class User : Entity<UserId>
 {
-    private readonly List<UserRole> _roles = new();
+    // IMPORTANT: not readonly, EF will set from jsonb
+    private List<UserRole> _roles = new();
 
     public TenantId TenantId { get; private set; }
     public EmailAddress Email { get; private set; }
 
     public string PasswordHash { get; private set; } = string.Empty;
-
     public string DisplayName { get; private set; } = string.Empty;
 
     public UserStatus Status { get; private set; }
 
-    public IReadOnlyCollection<UserRole> Roles => _roles;
+    public IReadOnlyCollection<UserRole> Roles => _roles.AsReadOnly();
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
-    private User() { }
+    private User()
+    {
+        TenantId = default;
+        Email = default;
+        CreatedAtUtc = DateTimeOffset.UtcNow;
+        UpdatedAtUtc = CreatedAtUtc;
+    }
 
     private User(
         UserId id,
@@ -46,7 +52,7 @@ public sealed class User : Entity<UserId>
 
         DisplayName = displayName;
 
-        _roles.AddRange(roles.Distinct());
+        _roles = (roles ?? Array.Empty<UserRole>()).Distinct().ToList();
 
         if (_roles.Count == 0)
             throw new ArgumentException("User must have at least one role.", nameof(roles));

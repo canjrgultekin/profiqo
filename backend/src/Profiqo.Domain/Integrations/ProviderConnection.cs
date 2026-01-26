@@ -97,6 +97,7 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
         Status = ProviderConnectionStatus.InvalidCredentials;
         Touch(nowUtc);
     }
+
     public void UpdateProfile(string displayName, string? externalAccountId, DateTimeOffset nowUtc)
     {
         DisplayName = Guard.AgainstTooLong(
@@ -124,6 +125,18 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
             Status = ProviderConnectionStatus.Active;
 
         Touch(nowUtc);
+    }
+
+    public void UpdateTokens(
+        string displayName,
+        string? externalAccountId,
+        EncryptedSecret accessToken,
+        EncryptedSecret? refreshToken,
+        DateTimeOffset? accessTokenExpiresAtUtc,
+        DateTimeOffset nowUtc)
+    {
+        UpdateProfile(displayName, externalAccountId, nowUtc);
+        RotateTokens(accessToken, refreshToken, accessTokenExpiresAtUtc, nowUtc);
     }
 
     private void Touch(DateTimeOffset nowUtc)

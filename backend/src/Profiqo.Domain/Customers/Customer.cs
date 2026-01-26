@@ -3,7 +3,6 @@ using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Domain.Customers;
 
-
 public sealed class Customer : AggregateRoot<CustomerId>
 {
     public TenantId TenantId { get; private set; }

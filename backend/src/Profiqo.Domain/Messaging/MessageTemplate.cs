@@ -1,8 +1,9 @@
-﻿using Profiqo.Domain.Common;
+﻿using System.Text.RegularExpressions;
+
+using Profiqo.Domain.Common;
 using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Domain.Messaging;
-
 
 public sealed class MessageTemplate : AggregateRoot<MessageTemplateId>
 {

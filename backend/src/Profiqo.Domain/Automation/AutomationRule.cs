@@ -1,7 +1,7 @@
-﻿namespace Profiqo.Domain.Automation;
-
-using Profiqo.Domain.Common;
+﻿using Profiqo.Domain.Common;
 using Profiqo.Domain.Common.Ids;
+
+namespace Profiqo.Domain.Automation;
 
 public sealed class AutomationRule : AggregateRoot<AutomationRuleId>
 {

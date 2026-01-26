@@ -2,8 +2,8 @@
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 using Profiqo.Domain.Common.Ids;
-using Profiqo.Infrastructure.Persistence.Entities;
 using Profiqo.Infrastructure.Persistence.Converters;
+using Profiqo.Infrastructure.Persistence.Entities;
 
 namespace Profiqo.Infrastructure.Persistence.Configurations;
 
@@ -14,6 +14,8 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder.ToTable("outbox_messages");
 
         builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Id).ValueGeneratedNever();
 
         builder.Property(x => x.TenantId)
             .HasConversion(new StronglyTypedIdConverter<TenantId>())
@@ -44,6 +46,8 @@ internal sealed class InboxMessageConfiguration : IEntityTypeConfiguration<Inbox
 
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.Id).ValueGeneratedNever();
+
         builder.Property(x => x.TenantId)
             .HasConversion(new StronglyTypedIdConverter<TenantId>())
             .IsRequired();
@@ -65,6 +69,8 @@ internal sealed class IngestionEventConfiguration : IEntityTypeConfiguration<Ing
         builder.ToTable("ingestion_events");
 
         builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Id).ValueGeneratedNever();
 
         builder.Property(x => x.TenantId)
             .HasConversion(new StronglyTypedIdConverter<TenantId>())
@@ -101,6 +107,8 @@ internal sealed class IntegrationCursorConfiguration : IEntityTypeConfiguration<
         builder.ToTable("integration_cursors");
 
         builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.Id).ValueGeneratedNever();
 
         builder.Property(x => x.TenantId)
             .HasConversion(new StronglyTypedIdConverter<TenantId>())

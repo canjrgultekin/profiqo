@@ -146,15 +146,6 @@ builder.Services.AddOpenTelemetry()
     });
 
 var app = builder.Build();
-using (var scope = app.Services.CreateScope())
-{
-    var env = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
-    if (env.IsDevelopment())
-    {
-        var db = scope.ServiceProvider.GetRequiredService<ProfiqoDbContext>();
-        await db.Database.MigrateAsync();
-    }
-}
 
 app.UseSerilogRequestLogging();
 

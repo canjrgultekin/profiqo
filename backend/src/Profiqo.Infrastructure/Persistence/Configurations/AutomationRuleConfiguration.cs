@@ -56,28 +56,52 @@ internal sealed class AutomationRuleConfiguration : IEntityTypeConfiguration<Aut
             b.Property(p => p.AttributionWindowDays).HasColumnName("goal_window_days").IsRequired();
         });
 
+        // Conditions - FK tipi düzeltildi
+        builder.Navigation(x => x.Conditions).UsePropertyAccessMode(PropertyAccessMode.Field);
         builder.OwnsMany(x => x.Conditions, b =>
         {
             b.ToTable("automation_rule_conditions");
-            b.WithOwner().HasForeignKey("automation_rule_id");
 
-            b.Property<int>("id");
-            b.HasKey("automation_rule_id", "id");
+            // FK'yı doğru tip ve converter ile tanımla
+            b.Property<AutomationRuleId>("AutomationRuleId")
+                .HasConversion(new StronglyTypedIdConverter<AutomationRuleId>())
+                .HasColumnName("automation_rule_id")
+                .IsRequired();
+
+            b.WithOwner().HasForeignKey("AutomationRuleId");
+
+            b.Property<int>("Id")
+                .HasColumnName("id")
+                .ValueGeneratedOnAdd();
+
+            b.HasKey("AutomationRuleId", "Id");
 
             b.Property(p => p.Field).HasMaxLength(200).HasColumnName("field").IsRequired();
             b.Property(p => p.Operator).HasConversion<short>().HasColumnName("op").IsRequired();
             b.Property(p => p.ValueJson).HasColumnType("jsonb").HasColumnName("value_json").IsRequired();
 
-            b.HasIndex("automation_rule_id");
+            b.HasIndex("AutomationRuleId");
         });
 
+        // Actions - FK tipi düzeltildi
+        builder.Navigation(x => x.Actions).UsePropertyAccessMode(PropertyAccessMode.Field);
         builder.OwnsMany(x => x.Actions, b =>
         {
             b.ToTable("automation_rule_actions");
-            b.WithOwner().HasForeignKey("automation_rule_id");
 
-            b.Property<int>("id");
-            b.HasKey("automation_rule_id", "id");
+            // FK'yı doğru tip ve converter ile tanımla
+            b.Property<AutomationRuleId>("AutomationRuleId")
+                .HasConversion(new StronglyTypedIdConverter<AutomationRuleId>())
+                .HasColumnName("automation_rule_id")
+                .IsRequired();
+
+            b.WithOwner().HasForeignKey("AutomationRuleId");
+
+            b.Property<int>("Id")
+                .HasColumnName("id")
+                .ValueGeneratedOnAdd();
+
+            b.HasKey("AutomationRuleId", "Id");
 
             b.Property(p => p.Type).HasConversion<short>().HasColumnName("type").IsRequired();
             b.Property(p => p.Channel).HasConversion<short?>().HasColumnName("channel");
@@ -86,8 +110,6 @@ internal sealed class AutomationRuleConfiguration : IEntityTypeConfiguration<Aut
                 .HasConversion(new StronglyTypedIdConverter<MessageTemplateId>())
                 .HasColumnName("template_id");
 
-            // IMPORTANT: EF cannot map IReadOnlyDictionary<string,string>
-            // We persist only JSON, and ignore the dictionary property.
             b.Ignore(p => p.Personalization);
 
             b.Property(p => p.PersonalizationJson)
@@ -99,7 +121,7 @@ internal sealed class AutomationRuleConfiguration : IEntityTypeConfiguration<Aut
             b.Property(p => p.TaskAssignee).HasMaxLength(200).HasColumnName("task_assignee");
             b.Property(p => p.TaskDescription).HasMaxLength(2000).HasColumnName("task_description");
 
-            b.HasIndex("automation_rule_id");
+            b.HasIndex("AutomationRuleId");
         });
 
         builder.HasIndex(x => new { x.TenantId, x.Status });

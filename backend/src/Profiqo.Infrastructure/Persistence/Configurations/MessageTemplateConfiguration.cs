@@ -14,13 +14,18 @@ internal sealed class MessageTemplateConfiguration : IEntityTypeConfiguration<Me
         builder.ToTable("message_templates");
 
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasConversion(new StronglyTypedIdConverter<MessageTemplateId>());
 
-        builder.Property(x => x.TenantId).HasConversion(new StronglyTypedIdConverter<TenantId>()).IsRequired();
+        builder.Property(x => x.Id)
+            .HasConversion(new StronglyTypedIdConverter<MessageTemplateId>())
+            .ValueGeneratedNever();
 
-        builder.Property(x => x.Name).HasMaxLength(160).IsRequired();
+        builder.Property(x => x.TenantId)
+            .HasConversion(new StronglyTypedIdConverter<TenantId>())
+            .IsRequired();
+
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Channel).HasConversion<short>().IsRequired();
-        builder.Property(x => x.Language).HasMaxLength(10).IsRequired();
+        builder.Property(x => x.Language).HasMaxLength(16).IsRequired();
 
         builder.Property(x => x.Body).HasColumnType("text").IsRequired();
 

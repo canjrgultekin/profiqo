@@ -39,7 +39,6 @@
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1-dev-02330" />
     <PackageReference Include="Serilog.Sinks.File" Version="8.0.0-dev-02318" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
-    <PackageReference Include="System.Linq.Queryable" Version="4.3.0" />
   </ItemGroup>
 
   <ItemGroup>

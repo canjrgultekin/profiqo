@@ -1,5 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.Json;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Users;
@@ -23,7 +27,6 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasConversion(new StronglyTypedIdConverter<TenantId>())
             .IsRequired();
 
-        // Email value object -> single column
         builder.Property(x => x.Email)
             .HasConversion(new EmailAddressConverter())
             .HasColumnName("email")
@@ -45,19 +48,36 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("status")
             .IsRequired();
 
-        // Roles: shadow jsonb (faz-1)
-        builder.Property<string>("roles_json")
+        var rolesConverter = new ValueConverter<List<UserRole>, string>(
+            v => JsonSerializer.Serialize(v.Select(r => (short)r).ToArray(), (JsonSerializerOptions?)null),
+            v => string.IsNullOrWhiteSpace(v)
+                ? new List<UserRole>()
+                : (JsonSerializer.Deserialize<short[]>(v, (JsonSerializerOptions?)null) ?? Array.Empty<short>())
+                .Select(x => (UserRole)x)
+                .ToList()
+        );
+
+        var rolesComparer = new ValueComparer<List<UserRole>>(
+            (l1, l2) => l1.SequenceEqual(l2),
+            l => l.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+            l => l.ToList());
+
+        builder.Property<List<UserRole>>("_roles")
             .HasColumnName("roles_json")
             .HasColumnType("jsonb")
-            .HasDefaultValue("[]")
-            .IsRequired();
+            .HasConversion(rolesConverter)
+            .Metadata.SetValueComparer(rolesComparer);
+
+        builder.Property<List<UserRole>>("_roles")
+            .IsRequired()
+            .HasDefaultValueSql("'[]'");
+
+        builder.Ignore(x => x.Roles);
 
         builder.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
         builder.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired().IsConcurrencyToken();
 
         builder.HasIndex(x => x.TenantId).HasDatabaseName("ix_users_tenant_id");
-
-        // Kritik: artık string adıyla değil expression ile unique index
         builder.HasIndex(x => x.Email).IsUnique().HasDatabaseName("ux_users_email");
     }
 }
