@@ -8,7 +8,11 @@
     <Project Path="src/Profiqo.Worker/Profiqo.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Profiqo.Tests.Integration/Profiqo.Tests.Integration.csproj" />
-    <Project Path="tests/Profiqo.Tests.Unit/Profiqo.Tests.Unit.csproj" />
+    <Project Path="tests/Profiqo.Tests.Integration/Profiqo.Tests.Integration.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="tests/Profiqo.Tests.Unit/Profiqo.Tests.Unit.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
   </Folder>
 </Solution>
