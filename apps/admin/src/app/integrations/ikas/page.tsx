@@ -33,7 +33,6 @@ type BatchResponse = {
 };
 
 function normalizeStartSync(payload: any): StartSyncResponse {
-  // Backend PascalCase olabilir: BatchId, Jobs, JobId, Kind
   const batchId = payload?.batchId ?? payload?.BatchId ?? "";
   const jobsRaw = payload?.jobs ?? payload?.Jobs ?? [];
   const jobs = Array.isArray(jobsRaw)
@@ -42,7 +41,6 @@ function normalizeStartSync(payload: any): StartSyncResponse {
         kind: x?.kind ?? x?.Kind ?? "",
       }))
     : [];
-
   return { batchId, jobs };
 }
 
@@ -66,7 +64,6 @@ function normalizeBatch(payload: any): BatchResponse {
         lastError: j?.lastError ?? j?.LastError ?? null,
       }))
     : [];
-
   return { batchId, jobs };
 }
 
@@ -75,6 +72,7 @@ export default function IkasIntegrationPage() {
   const [storeDomain, setStoreDomain] = useState("");
   const [accessToken, setAccessToken] = useState("");
 
+  const [hasExisting, setHasExisting] = useState(false);
   const [connectionId, setConnectionId] = useState<string | null>(null);
 
   const [log, setLog] = useState<string>("");
@@ -94,10 +92,59 @@ export default function IkasIntegrationPage() {
     return jobs.some((j) => j.status === "Queued" || j.status === "Running");
   }, [batch]);
 
-  const connect = async () => {
-    setLog("");
+  // ✅ Load existing connection on page load
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      const res = await fetch("/api/integrations/ikas/connection", { method: "GET", cache: "no-store" });
+      const payload = await res.json().catch(() => null);
+
+      if (cancelled) return;
+
+      if (!res.ok) {
+        append(`LOAD CONNECTION ERROR: ${payload?.message || JSON.stringify(payload)}`);
+        return;
+      }
+
+      const hasConnection = Boolean(payload?.hasConnection ?? payload?.HasConnection);
+      if (!hasConnection) {
+        setHasExisting(false);
+        setConnectionId(null);
+        return;
+      }
+
+      setHasExisting(true);
+
+      const cid = payload?.connectionId ?? payload?.ConnectionId;
+      setConnectionId(cid);
+
+      setStoreLabel(payload?.displayName ?? payload?.DisplayName ?? "");
+      setStoreDomain(payload?.externalAccountId ?? payload?.ExternalAccountId ?? "");
+
+      // token asla plaintext gösterilmez
+      setAccessToken("");
+
+      append(`Existing Ikas connection loaded. connectionId=${cid}`);
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connectOrUpdate = async () => {
     setBatchId(null);
     setBatch(null);
+
+    // Eğer mevcut connection varsa token update yapmak için token zorunlu
+    if (hasExisting && !accessToken.trim()) {
+      append("UPDATE TOKEN ERROR: Mevcut connection var. Token güncellemek için Access Token girmen lazım.");
+      return;
+    }
 
     const res = await fetch("/api/integrations/ikas/connect", {
       method: "POST",
@@ -108,12 +155,18 @@ export default function IkasIntegrationPage() {
     const payload = await res.json().catch(() => null);
 
     if (!res.ok) {
-      append(`CONNECT ERROR: ${payload?.message || JSON.stringify(payload)}`);
+      append(`CONNECT/UPDATE ERROR: ${payload?.message || JSON.stringify(payload)}`);
       return;
     }
 
-    setConnectionId(payload.connectionId ?? payload.ConnectionId ?? null);
-    append(`Connected. connectionId=${payload.connectionId ?? payload.ConnectionId}`);
+    const cid = payload?.connectionId ?? payload?.ConnectionId;
+    setConnectionId(cid);
+    setHasExisting(true);
+
+    // token alanını temizle (DB’de şifreli duruyor)
+    setAccessToken("");
+
+    append(`${hasExisting ? "Updated" : "Connected"}. connectionId=${cid}`);
   };
 
   const test = async () => {
@@ -132,7 +185,7 @@ export default function IkasIntegrationPage() {
       return;
     }
 
-    append(`Test OK. meId=${payload.meId ?? payload.MeId}`);
+    append(`Test OK. meId=${payload?.meId ?? payload?.MeId}`);
   };
 
   const startSync = async () => {
@@ -257,19 +310,24 @@ export default function IkasIntegrationPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="text-sm text-body-color dark:text-dark-6">Access Token</label>
+            <label className="text-sm text-body-color dark:text-dark-6">
+              Access Token {hasExisting ? "(stored, paste here to rotate/update)" : ""}
+            </label>
             <textarea
               className="min-h-[120px] w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
               value={accessToken}
               onChange={(e) => setAccessToken(e.target.value)}
-              placeholder="Bearer token"
+              placeholder={hasExisting ? "Token DB'de var. Güncellemek istersen buraya yeni token yapıştır." : "Bearer token"}
             />
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90" onClick={connect}>
-            Connect
+          <button
+            className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90"
+            onClick={connectOrUpdate}
+          >
+            {hasExisting ? "Update Token" : "Connect"}
           </button>
 
           <button

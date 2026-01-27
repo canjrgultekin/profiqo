@@ -3,10 +3,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
+using Profiqo.Application.Abstractions.Tenancy;
+using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Integrations.Ikas.Commands.ConnectIkas;
 using Profiqo.Application.Integrations.Ikas.Commands.StartIkasSync;
 using Profiqo.Application.Integrations.Ikas.Commands.TestIkas;
+using Profiqo.Domain.Integrations;
 
 namespace Profiqo.Api.Controllers;
 
@@ -17,11 +20,43 @@ public sealed class IkasIntegrationController : ControllerBase
 {
     private readonly ISender _sender;
     private readonly IIntegrationJobRepository _jobs;
+    private readonly ITenantContext _tenant;
+    private readonly IProviderConnectionRepository _connections;
 
-    public IkasIntegrationController(ISender sender, IIntegrationJobRepository jobs)
+    public IkasIntegrationController(
+        ISender sender,
+        IIntegrationJobRepository jobs,
+        ITenantContext tenant,
+        IProviderConnectionRepository connections)
     {
         _sender = sender;
         _jobs = jobs;
+        _tenant = tenant;
+        _connections = connections;
+    }
+
+    // ✅ New: return existing ikas connection (token never returned)
+    [HttpGet("connection")]
+    public async Task<IActionResult> GetConnection(CancellationToken ct)
+    {
+        var tenantId = _tenant.CurrentTenantId;
+        if (tenantId is null)
+            return BadRequest(new { message = "X-Tenant-Id header is required." });
+
+        var conn = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Ikas, ct);
+        if (conn is null)
+            return Ok(new { hasConnection = false });
+
+        return Ok(new
+        {
+            hasConnection = true,
+            connectionId = conn.Id.Value,
+            providerType = conn.ProviderType.ToString(),
+            status = conn.Status.ToString(),
+            displayName = conn.DisplayName,
+            externalAccountId = conn.ExternalAccountId,
+            accessTokenExpiresAtUtc = conn.AccessTokenExpiresAtUtc
+        });
     }
 
     public sealed record ConnectRequest(string StoreLabel, string? StoreDomain, string AccessToken);
