@@ -1,3 +1,4 @@
+// Path: apps/admin/src/app/api/tenant/users/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
@@ -15,17 +16,49 @@ function clearAuthCookies(res: NextResponse) {
   res.cookies.set(ROLES_COOKIE, "", { path: "/", maxAge: 0 });
 }
 
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ACCESS_COOKIE)?.value;
-  const tenantId = cookieStore.get(TENANT_COOKIE)?.value;
+export async function GET() {
+  const cs = await cookies();
+  const token = cs.get(ACCESS_COOKIE)?.value;
+  const tenantId = cs.get(TENANT_COOKIE)?.value;
 
   if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   if (!tenantId) return NextResponse.json({ message: "Tenant cookie missing" }, { status: 400 });
 
-  const upstream = await fetch(`${backendBaseUrl()}/api/integrations/ikas/test`, {
+  const upstream = await fetch(`${backendBaseUrl()}/api/tenant/users`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}`, "X-Tenant-Id": tenantId },
+    cache: "no-store",
+  });
+
+  const text = await upstream.text();
+
+  if (upstream.status === 401) {
+    const res = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    clearAuthCookies(res);
+    return res;
+  }
+
+  let payload: any;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { message: "Backend returned non-JSON", raw: text?.slice(0, 2000) || "" };
+  }
+
+  return NextResponse.json(payload, { status: upstream.status });
+}
+
+export async function POST(req: Request) {
+  const body = await req.json().catch(() => null);
+
+  const cs = await cookies();
+  const token = cs.get(ACCESS_COOKIE)?.value;
+  const tenantId = cs.get(TENANT_COOKIE)?.value;
+
+  if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  if (!tenantId) return NextResponse.json({ message: "Tenant cookie missing" }, { status: 400 });
+
+  const upstream = await fetch(`${backendBaseUrl()}/api/tenant/users`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -44,7 +77,7 @@ export async function POST(req: Request) {
     return res;
   }
 
-  let payload: any = null;
+  let payload: any;
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {

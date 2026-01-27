@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Infrastructure.Persistence;
 
@@ -9,7 +10,7 @@ namespace Profiqo.Api.Controllers;
 
 [ApiController]
 [Route("api/orders")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.ReportAccess)]
 public sealed class OrdersController : ControllerBase
 {
     private readonly ProfiqoDbContext _db;

@@ -3,18 +3,16 @@ import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = "profiqo_access_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
+const ROLES_COOKIE = "profiqo_roles";
 
 function backendBaseUrl(): string {
   return process.env.PROFIQO_BACKEND_URL?.trim() || "http://localhost:5164";
 }
 
-function tryParseJson(text: string): any | null {
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+function clearAuthCookies(res: NextResponse) {
+  res.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(TENANT_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(ROLES_COOKIE, "", { path: "/", maxAge: 0 });
 }
 
 export async function POST(req: Request) {
@@ -39,18 +37,19 @@ export async function POST(req: Request) {
   });
 
   const text = await upstream.text();
-  const json = tryParseJson(text);
 
-  // If backend returned non-JSON (e.g. plain text error page), wrap it safely
-  if (json === null) {
-    return NextResponse.json(
-      {
-        message: "Backend returned non-JSON response.",
-        raw: text?.slice(0, 2000) || "",
-      },
-      { status: upstream.status }
-    );
+  if (upstream.status === 401) {
+    const res = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    clearAuthCookies(res);
+    return res;
   }
 
-  return NextResponse.json(json, { status: upstream.status });
+  let payload: any = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { message: "Backend returned non-JSON", raw: text?.slice(0, 2000) || "" };
+  }
+
+  return NextResponse.json(payload, { status: upstream.status });
 }

@@ -3,9 +3,16 @@ import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = "profiqo_access_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
+const ROLES_COOKIE = "profiqo_roles";
 
 function backendBaseUrl(): string {
   return process.env.PROFIQO_BACKEND_URL?.trim() || "http://localhost:5164";
+}
+
+function clearAuthCookies(res: NextResponse) {
+  res.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(TENANT_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(ROLES_COOKIE, "", { path: "/", maxAge: 0 });
 }
 
 export async function GET() {
@@ -18,14 +25,18 @@ export async function GET() {
 
   const upstream = await fetch(`${backendBaseUrl()}/api/integrations/status`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-Tenant-Id": tenantId,
-    },
+    headers: { Authorization: `Bearer ${token}`, "X-Tenant-Id": tenantId },
     cache: "no-store",
   });
 
   const text = await upstream.text();
+
+  if (upstream.status === 401) {
+    const res = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    clearAuthCookies(res);
+    return res;
+  }
+
   let payload: any = null;
   try {
     payload = text ? JSON.parse(text) : null;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 type LoginRequest = {
   tenantSlug?: string;
@@ -11,6 +12,7 @@ const ACCESS_COOKIE = "profiqo_access_token";
 const REFRESH_COOKIE = "profiqo_refresh_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
 const USER_COOKIE = "profiqo_user_id";
+const ROLES_COOKIE = "profiqo_roles";
 
 function backendBaseUrl(): string {
   return process.env.PROFIQO_BACKEND_URL?.trim() || "http://localhost:5164";
@@ -27,7 +29,6 @@ async function safeReadJson(res: Response): Promise<any> {
 }
 
 function pickAccessToken(payload: any): string | null {
-  // camelCase variants
   const t1 =
     payload?.tokens?.accessToken ||
     payload?.tokens?.token ||
@@ -35,7 +36,6 @@ function pickAccessToken(payload: any): string | null {
     payload?.token ||
     payload?.jwt;
 
-  // PascalCase variants (because ASP.NET output is PascalCase in your API)
   const t2 =
     payload?.Tokens?.AccessToken ||
     payload?.Tokens?.Token ||
@@ -80,6 +80,80 @@ function pickUserInfo(payload: any): { tenantId: string | null; userId: string |
   const roles = u?.roles || u?.Roles || payload?.roles || payload?.Roles || null;
 
   return { tenantId, userId, roles };
+}
+
+// Map numeric role codes -> names
+function roleNameFromCode(code: string): string | null {
+  switch (code) {
+    case "1": return "Owner";
+    case "2": return "Admin";
+    case "3": return "Reporting";
+    case "4": return "Integration";
+    default: return null;
+  }
+}
+
+function normalizeRolesToString(roles: any): string | null {
+  if (!roles) return null;
+
+  const out: string[] = [];
+
+  if (Array.isArray(roles)) {
+    for (const r of roles) {
+      const s = String(r).trim();
+      if (!s) continue;
+
+      // already a name?
+      if (["Owner", "Admin", "Reporting", "Integration"].includes(s)) {
+        out.push(s);
+        continue;
+      }
+
+      // numeric?
+      const mapped = roleNameFromCode(s);
+      if (mapped) out.push(mapped);
+    }
+  } else {
+    const s = String(roles).trim();
+    if (["Owner", "Admin", "Reporting", "Integration"].includes(s)) out.push(s);
+    else {
+      const mapped = roleNameFromCode(s);
+      if (mapped) out.push(mapped);
+    }
+  }
+
+  const distinct = Array.from(new Set(out));
+  return distinct.length ? distinct.join(",") : null;
+}
+
+// Try extract roles from JWT payload if backend didn't return roles.
+// This is only for UI gating; signature verification isn't required here.
+function tryGetRolesFromJwt(accessToken: string): string | null {
+  try {
+    const parts = accessToken.split(".");
+    if (parts.length < 2) return null;
+
+    const payloadB64 = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(parts[1].length / 4) * 4, "=");
+
+    const json = Buffer.from(payloadB64, "base64").toString("utf8");
+    const payload = JSON.parse(json);
+
+    // common claims patterns
+    const candidates =
+      payload?.roles ??
+      payload?.role ??
+      payload?.Roles ??
+      payload?.Role ??
+      payload?.["http://schemas.microsoft.com/ws/2008/06/identity/claims/role"] ??
+      null;
+
+    return normalizeRolesToString(candidates);
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(req: Request) {
@@ -127,14 +201,9 @@ export async function POST(req: Request) {
   }
 
   const accessToken = pickAccessToken(payload);
-
   if (!accessToken) {
     return NextResponse.json(
-      {
-        ok: false,
-        message: "Backend login response içinde access token yok.",
-        debug: payload, // local debug, istersen kaldırırız
-      },
+      { ok: false, message: "Backend login response içinde access token yok." },
       { status: 500 }
     );
   }
@@ -145,6 +214,7 @@ export async function POST(req: Request) {
   const isProd = process.env.NODE_ENV === "production";
   const res = NextResponse.json({ ok: true, tenantId, userId, roles });
 
+  // Access token cookie
   if (expiresAt) {
     res.cookies.set(ACCESS_COOKIE, accessToken, {
       httpOnly: true,
@@ -163,17 +233,7 @@ export async function POST(req: Request) {
     });
   }
 
-  // Refresh token şimdilik backend dönmüyorsa temizle
-  if (!remember) {
-    res.cookies.set(REFRESH_COOKIE, "", {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 0,
-    });
-  }
-
+  // Tenant/User cookies
   if (tenantId) {
     res.cookies.set(TENANT_COOKIE, tenantId, {
       httpOnly: true,
@@ -193,6 +253,45 @@ export async function POST(req: Request) {
       maxAge: 30 * 24 * 60 * 60,
     });
   }
+
+  // Roles cookie for middleware RBAC
+  let rolesStr = normalizeRolesToString(roles);
+  if (!rolesStr) {
+    rolesStr = tryGetRolesFromJwt(accessToken);
+  }
+
+  if (rolesStr) {
+    res.cookies.set(ROLES_COOKIE, rolesStr, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60,
+    });
+  } else {
+    // clear to avoid stale RBAC
+    res.cookies.set(ROLES_COOKIE, "", {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
+  }
+
+  // Refresh token handling (backend may not return; if remember false clear)
+  if (!remember) {
+    res.cookies.set(REFRESH_COOKIE, "", {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
+  }
+
+  // keep Next 16 async cookies API happy
+  await cookies();
 
   return res;
 }

@@ -29,6 +29,13 @@ export const NAV_DATA = [
           { title: "Ikas", url: "/integrations/ikas" },
         ],
       },
+      {
+        title: "Settings",
+        icon: Icons.Alphabet,
+        items: [
+          { title: "Users", url: "/settings/users" },
+        ],
+      },
     ],
   },
   {

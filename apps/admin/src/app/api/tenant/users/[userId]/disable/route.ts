@@ -1,3 +1,4 @@
+// Path: apps/admin/src/app/api/tenant/users/[userId]/disable/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
@@ -15,7 +16,7 @@ function clearAuthCookies(res: NextResponse) {
   res.cookies.set(ROLES_COOKIE, "", { path: "/", maxAge: 0 });
 }
 
-async function resolveParams(ctx: any): Promise<{ jobId: string }> {
+async function resolveParams(ctx: any): Promise<{ userId: string }> {
   if (ctx?.params && typeof ctx.params?.then === "function") return await ctx.params;
   if (ctx && typeof ctx?.then === "function") {
     const awaited = await ctx;
@@ -25,21 +26,21 @@ async function resolveParams(ctx: any): Promise<{ jobId: string }> {
   return ctx?.params;
 }
 
-export async function GET(_req: Request, ctx: any) {
+export async function POST(_req: Request, ctx: any) {
   const params = await resolveParams(ctx);
-  const jobId = params?.jobId;
+  const userId = params?.userId;
 
-  if (!jobId) return NextResponse.json({ message: "jobId missing" }, { status: 400 });
+  if (!userId) return NextResponse.json({ message: "userId missing" }, { status: 400 });
 
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ACCESS_COOKIE)?.value;
-  const tenantId = cookieStore.get(TENANT_COOKIE)?.value;
+  const cs = await cookies();
+  const token = cs.get(ACCESS_COOKIE)?.value;
+  const tenantId = cs.get(TENANT_COOKIE)?.value;
 
   if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   if (!tenantId) return NextResponse.json({ message: "Tenant cookie missing" }, { status: 400 });
 
-  const upstream = await fetch(`${backendBaseUrl()}/api/integrations/ikas/jobs/${jobId}`, {
-    method: "GET",
+  const upstream = await fetch(`${backendBaseUrl()}/api/tenant/users/${userId}/disable`, {
+    method: "POST",
     headers: { Authorization: `Bearer ${token}`, "X-Tenant-Id": tenantId },
     cache: "no-store",
   });
@@ -53,8 +54,11 @@ export async function GET(_req: Request, ctx: any) {
   }
 
   let payload: any;
-  try { payload = text ? JSON.parse(text) : null; }
-  catch { payload = { message: "Backend returned non-JSON", raw: text?.slice(0, 2000) || "" }; }
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { message: "Backend returned non-JSON", raw: text?.slice(0, 2000) || "" };
+  }
 
   return NextResponse.json(payload, { status: upstream.status });
 }

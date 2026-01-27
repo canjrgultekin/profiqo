@@ -3,9 +3,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-using Profiqo.Application.Abstractions.Tenancy;
-using Profiqo.Application.Abstractions.Persistence.Repositories;
+using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Persistence;
+using Profiqo.Application.Abstractions.Persistence.Repositories;
+using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Application.Integrations.Ikas.Commands.ConnectIkas;
 using Profiqo.Application.Integrations.Ikas.Commands.StartIkasSync;
 using Profiqo.Application.Integrations.Ikas.Commands.TestIkas;
@@ -15,7 +16,8 @@ namespace Profiqo.Api.Controllers;
 
 [ApiController]
 [Route("api/integrations/ikas")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.IntegrationAccess)]
+
 public sealed class IkasIntegrationController : ControllerBase
 {
     private readonly ISender _sender;

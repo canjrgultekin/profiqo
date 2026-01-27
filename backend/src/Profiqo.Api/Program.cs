@@ -117,6 +117,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddProfiqoAuthorization();
 
 var rl = builder.Configuration.GetSection("Profiqo:RateLimit").Get<RateLimitOptions>() ?? new RateLimitOptions();
 
