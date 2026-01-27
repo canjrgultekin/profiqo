@@ -21,22 +21,15 @@ internal sealed class CustomerRepository : ICustomerRepository
     public async Task<Customer?> FindByIdentityHashAsync(
         TenantId tenantId,
         IdentityType identityType,
-        string valueHash,
-        CancellationToken cancellationToken)
+        IdentityHash valueHash,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(valueHash))
-            throw new ArgumentException("valueHash is required.", nameof(valueHash));
-
-        // Tenant filter is already on, but we still match tenant explicitly for clarity and safety.
-        var hash = new IdentityHash(valueHash);
-
         return await _db.Customers
+            .AsTracking()
             .Where(c => c.TenantId == tenantId)
-            .Where(c => c.Identities.Any(i => i.Type == identityType && i.ValueHash == hash))
-            .FirstOrDefaultAsync(cancellationToken);
-
+            .Where(c => c.Identities.Any(i => i.Type == identityType && i.ValueHash == valueHash))
+            .FirstOrDefaultAsync(ct);
     }
-
     public async Task AddAsync(Customer customer, CancellationToken cancellationToken)
     {
         await _db.Customers.AddAsync(customer, cancellationToken);

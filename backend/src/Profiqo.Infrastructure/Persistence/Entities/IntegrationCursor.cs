@@ -15,22 +15,19 @@ public sealed class IntegrationCursor
 
     private IntegrationCursor() { }
 
-    public IntegrationCursor(Guid id, TenantId tenantId, ProviderConnectionId providerConnectionId, string cursorKey, string cursorValue)
+    public IntegrationCursor(Guid id, TenantId tenantId, ProviderConnectionId providerConnectionId, string cursorKey, string cursorValue, DateTimeOffset updatedAtUtc)
     {
-        if (id == Guid.Empty) throw new ArgumentException("Id cannot be empty.", nameof(id));
-        if (string.IsNullOrWhiteSpace(cursorKey)) throw new ArgumentException("CursorKey is required.", nameof(cursorKey));
-
         Id = id;
         TenantId = tenantId;
         ProviderConnectionId = providerConnectionId;
         CursorKey = cursorKey;
         CursorValue = cursorValue;
-        UpdatedAtUtc = DateTimeOffset.UtcNow;
+        UpdatedAtUtc = updatedAtUtc;
     }
 
-    public void Update(string cursorValue)
+    public void Update(string cursorValue, DateTimeOffset nowUtc)
     {
         CursorValue = cursorValue;
-        UpdatedAtUtc = DateTimeOffset.UtcNow;
+        UpdatedAtUtc = nowUtc;
     }
 }

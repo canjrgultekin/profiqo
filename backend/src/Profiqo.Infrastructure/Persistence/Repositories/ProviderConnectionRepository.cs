@@ -1,7 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 
 using Profiqo.Application.Abstractions.Persistence.Repositories;
-using Profiqo.Domain.Common;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Integrations;
 
@@ -16,14 +15,20 @@ internal sealed class ProviderConnectionRepository : IProviderConnectionReposito
         _db = db;
     }
 
-    public Task<ProviderConnection?> GetByIdAsync(ProviderConnectionId id, CancellationToken cancellationToken)
-        => _db.ProviderConnections.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public Task<ProviderConnection?> GetByIdAsync(ProviderConnectionId id, CancellationToken ct)
+        => _db.ProviderConnections.FirstOrDefaultAsync(x => x.Id == id, ct);
 
-    public Task<ProviderConnection?> GetByProviderAsync(TenantId tenantId, ProviderType providerType, CancellationToken cancellationToken)
-        => _db.ProviderConnections.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ProviderType == providerType, cancellationToken);
+    public Task<ProviderConnection?> GetByProviderAsync(TenantId tenantId, ProviderType providerType, CancellationToken ct)
+        => _db.ProviderConnections.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ProviderType == providerType, ct);
 
-    public async Task AddAsync(ProviderConnection connection, CancellationToken cancellationToken)
+    public async Task AddAsync(ProviderConnection entity, CancellationToken ct)
     {
-        await _db.ProviderConnections.AddAsync(connection, cancellationToken);
+        await _db.ProviderConnections.AddAsync(entity, ct);
+    }
+
+    public Task ClearTrackingAsync(CancellationToken ct)
+    {
+        _db.ChangeTracker.Clear();
+        return Task.CompletedTask;
     }
 }

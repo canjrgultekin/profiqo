@@ -1,12 +1,12 @@
 ﻿using Microsoft.EntityFrameworkCore;
 
-using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
+using Profiqo.Application.Customers.IdentityResolution;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Customers;
-using Profiqo.Domain.Integrations;
 using Profiqo.Domain.Orders;
 using Profiqo.Domain.Common.Types;
+using Profiqo.Domain.Integrations;
 using Profiqo.Infrastructure.Persistence;
 
 namespace Profiqo.Infrastructure.Integrations.Ikas;
@@ -14,144 +14,106 @@ namespace Profiqo.Infrastructure.Integrations.Ikas;
 internal sealed class IkasSyncStore : IIkasSyncStore
 {
     private readonly ProfiqoDbContext _db;
-    private readonly ISecretProtector _secrets;
+    private readonly IIdentityResolutionService _resolver;
 
-    public IkasSyncStore(ProfiqoDbContext db, ISecretProtector secrets)
+    public IkasSyncStore(ProfiqoDbContext db, IIdentityResolutionService resolver)
     {
         _db = db;
-        _secrets = secrets;
+        _resolver = resolver;
     }
 
     public async Task<CustomerId> UpsertCustomerAsync(TenantId tenantId, IkasCustomerUpsert model, CancellationToken ct)
     {
-        // Try find by email hash then phone hash via owned identities
-        Customer? existing = null;
-
-        if (!string.IsNullOrWhiteSpace(model.EmailHashSha256))
-        {
-            var h = new IdentityHash(model.EmailHashSha256);
-            existing = await _db.Customers
-                .AsTracking()
-                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Identities.Any(i => i.Type == IdentityType.Email && i.ValueHash == h), ct);
-        }
-
-        if (existing is null && !string.IsNullOrWhiteSpace(model.PhoneHashSha256))
-        {
-            var h = new IdentityHash(model.PhoneHashSha256);
-            existing = await _db.Customers
-                .AsTracking()
-                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Identities.Any(i => i.Type == IdentityType.Phone && i.ValueHash == h), ct);
-        }
-
         var now = DateTimeOffset.UtcNow;
 
-        if (existing is null)
-        {
-            var created = Customer.Create(tenantId, now);
-            created.SetName(model.FirstName, model.LastName, now);
+        var ids = new List<IdentityInput>();
 
-            AddIdentityIfPresent(created, tenantId, model, now);
+        if (!string.IsNullOrWhiteSpace(model.EmailNormalized) && !string.IsNullOrWhiteSpace(model.EmailHashSha256))
+            ids.Add(new IdentityInput(IdentityType.Email, model.EmailNormalized, new IdentityHash(model.EmailHashSha256), ProviderType.Ikas, model.ProviderCustomerId));
 
-            await _db.Customers.AddAsync(created, ct);
-            await _db.SaveChangesAsync(ct);
+        if (!string.IsNullOrWhiteSpace(model.PhoneNormalized) && !string.IsNullOrWhiteSpace(model.PhoneHashSha256))
+            ids.Add(new IdentityInput(IdentityType.Phone, model.PhoneNormalized, new IdentityHash(model.PhoneHashSha256), ProviderType.Ikas, model.ProviderCustomerId));
 
-            return created.Id;
-        }
-
-        existing.SetName(model.FirstName, model.LastName, now);
-        AddIdentityIfPresent(existing, tenantId, model, now);
+        var customerId = await _resolver.ResolveOrCreateCustomerAsync(
+            tenantId,
+            model.FirstName,
+            model.LastName,
+            ids,
+            now,
+            ct);
 
         await _db.SaveChangesAsync(ct);
-
-        return existing.Id;
+        return customerId;
     }
 
     public async Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct)
     {
-        // Idempotent: (TenantId, Channel=Ikas, ProviderOrderId) unique index should exist
-        var existing = await _db.Orders
-            .AsTracking()
-            .FirstOrDefaultAsync(o => o.TenantId == tenantId && o.Channel == SalesChannel.Ikas && o.ProviderOrderId == model.ProviderOrderId, ct);
+        var exists = await _db.Orders.AsNoTracking()
+            .AnyAsync(o => o.TenantId == tenantId && o.Channel == SalesChannel.Ikas && o.ProviderOrderId == model.ProviderOrderId, ct);
 
-        if (existing is not null)
-            return existing.Id;
-
-        // Find/Upsert customer (best-effort)
-        var custId = CustomerId.New();
-        if (!string.IsNullOrWhiteSpace(model.CustomerEmailHashSha256) || !string.IsNullOrWhiteSpace(model.CustomerPhoneHashSha256))
+        if (exists)
         {
-            var c = await UpsertCustomerAsync(tenantId,
-                new IkasCustomerUpsert(
-                    ProviderCustomerId: "ikas-order",
-                    FirstName: null,
-                    LastName: null,
-                    EmailNormalized: model.CustomerEmailNormalized,
-                    EmailHashSha256: model.CustomerEmailHashSha256,
-                    PhoneNormalized: model.CustomerPhoneNormalized,
-                    PhoneHashSha256: model.CustomerPhoneHashSha256),
-                ct);
-
-            custId = c;
+            var id = await _db.Orders.AsNoTracking()
+                .Where(o => o.TenantId == tenantId && o.Channel == SalesChannel.Ikas && o.ProviderOrderId == model.ProviderOrderId)
+                .Select(o => o.Id)
+                .FirstAsync(ct);
+            return id;
         }
 
-        var currency = new CurrencyCode(model.CurrencyCode);
-        var total = new Money(model.TotalFinalPrice, currency);
+        var now = DateTimeOffset.UtcNow;
 
-        var lines = new List<OrderLine>
+        var ids = new List<IdentityInput>();
+
+        if (!string.IsNullOrWhiteSpace(model.CustomerEmailNormalized) && !string.IsNullOrWhiteSpace(model.CustomerEmailHashSha256))
+            ids.Add(new IdentityInput(IdentityType.Email, model.CustomerEmailNormalized, new IdentityHash(model.CustomerEmailHashSha256), ProviderType.Ikas, model.ProviderOrderId));
+
+        if (!string.IsNullOrWhiteSpace(model.CustomerPhoneNormalized) && !string.IsNullOrWhiteSpace(model.CustomerPhoneHashSha256))
+            ids.Add(new IdentityInput(IdentityType.Phone, model.CustomerPhoneNormalized, new IdentityHash(model.CustomerPhoneHashSha256), ProviderType.Ikas, model.ProviderOrderId));
+
+        var customerId = ids.Count > 0
+            ? await _resolver.ResolveOrCreateCustomerAsync(tenantId, null, null, ids, now, ct)
+            : CustomerId.New();
+
+        var currency = new CurrencyCode(model.CurrencyCode);
+
+        // Create real order lines from Ikas orderLineItems
+        var lines = new List<OrderLine>();
+
+        if (model.Lines is not null && model.Lines.Count > 0)
         {
-            new OrderLine("ikas", "ikas order", 1, total)
-        };
+            foreach (var l in model.Lines)
+            {
+                var lineCurrency = new CurrencyCode(l.CurrencyCode);
+                var lineTotal = new Money(l.FinalPrice * l.Quantity, lineCurrency);
+
+                var sku = string.IsNullOrWhiteSpace(l.Sku) ? (l.ProviderVariantId ?? l.ProviderProductId ?? "unknown") : l.Sku!;
+                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName;
+
+                // IMPORTANT: This assumes OrderLine ctor: (sku, productName, quantity, lineTotal)
+                lines.Add(new OrderLine(sku, name, l.Quantity, lineTotal));
+            }
+        }
+        else
+        {
+            // fallback
+            lines.Add(new OrderLine("ikas", "ikas order", 1, new Money(model.TotalFinalPrice, currency)));
+        }
+
+        var total = new Money(model.TotalFinalPrice, currency);
 
         var order = Order.Create(
             tenantId: tenantId,
-            customerId: custId,
+            customerId: customerId,
             channel: SalesChannel.Ikas,
             providerOrderId: model.ProviderOrderId,
             placedAtUtc: model.PlacedAtUtc,
             lines: lines,
             totalAmount: total,
-            nowUtc: DateTimeOffset.UtcNow);
+            nowUtc: now);
 
         await _db.Orders.AddAsync(order, ct);
         await _db.SaveChangesAsync(ct);
 
         return order.Id;
-    }
-
-    private void AddIdentityIfPresent(Customer customer, TenantId tenantId, IkasCustomerUpsert model, DateTimeOffset now)
-    {
-        if (!string.IsNullOrWhiteSpace(model.EmailNormalized) && !string.IsNullOrWhiteSpace(model.EmailHashSha256))
-        {
-            var hash = new IdentityHash(model.EmailHashSha256);
-            var enc = _secrets.Protect(model.EmailNormalized);
-
-            var identity = CustomerIdentity.Create(
-                tenantId: tenantId,
-                type: IdentityType.Email,
-                valueHash: hash,
-                valueEncrypted: enc,
-                sourceProvider: ProviderType.Ikas,
-                sourceExternalId: model.ProviderCustomerId,
-                nowUtc: now);
-
-            customer.AddOrTouchIdentity(identity, now);
-        }
-
-        if (!string.IsNullOrWhiteSpace(model.PhoneNormalized) && !string.IsNullOrWhiteSpace(model.PhoneHashSha256))
-        {
-            var hash = new IdentityHash(model.PhoneHashSha256);
-            var enc = _secrets.Protect(model.PhoneNormalized);
-
-            var identity = CustomerIdentity.Create(
-                tenantId: tenantId,
-                type: IdentityType.Phone,
-                valueHash: hash,
-                valueEncrypted: enc,
-                sourceProvider: ProviderType.Ikas,
-                sourceExternalId: model.ProviderCustomerId,
-                nowUtc: now);
-
-            customer.AddOrTouchIdentity(identity, now);
-        }
     }
 }

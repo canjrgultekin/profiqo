@@ -12,7 +12,6 @@ namespace Profiqo.Infrastructure.Integrations.Ikas;
 
 public sealed class IkasOptions
 {
-    // IMPORTANT: your confirmed endpoint
     public string GraphqlEndpoint { get; init; } = "https://api.myikas.com/api/admin/graphql";
     public int DefaultPageSize { get; init; } = 50;
     public int DefaultMaxPages { get; init; } = 20;
@@ -32,22 +31,20 @@ internal sealed class IkasGraphqlClient : IIkasGraphqlClient
     public async Task<string> MeAsync(string accessToken, CancellationToken ct)
     {
         const string op = "me";
+
         var payload = new
         {
             operationName = op,
-            query = @"
-query me {
-  me { id }
-}",
+            query = @"query me { me { id } }",
             variables = new { }
         };
 
         using var doc = await PostAsync(accessToken, op, payload, ct);
-
         var id = doc.RootElement.GetProperty("data").GetProperty("me").GetProperty("id").GetString();
         return id ?? throw new InvalidOperationException("Ikas me.id missing.");
     }
 
+    // ✅ NO updatedAt filter (as you verified)
     public Task<JsonDocument> ListCustomersAsync(string accessToken, int page, int limit, CancellationToken ct)
     {
         const string op = "listCustomer";
@@ -56,26 +53,46 @@ query me {
         {
             operationName = op,
             query = @"
-query listCustomer($page:Int!, $limit:Int!) {
-  listCustomer(pagination: { page: $page, limit: $limit }) {
+query listCustomer(
+  $pagination: PaginationInput,
+  $search: String,
+  $sort: String
+) {
+  listCustomer(
+    pagination: $pagination,
+    search: $search,
+    sort: $sort
+  ) {
+    count
+    page
+    limit
+    hasNext
     data {
       id
       email
       firstName
       lastName
       phone
-      createdAt
+      orderCount
+      totalOrderPrice
       updatedAt
+      createdAt
     }
   }
 }",
-            variables = new { page, limit }
+            variables = new
+            {
+                pagination = new { page, limit },
+                search = (string?)null,
+                sort = "-updatedAt"
+            }
         };
 
         return PostAsync(accessToken, op, payload, ct);
     }
 
-    public Task<JsonDocument> ListOrdersAsync(string accessToken, int page, int limit, CancellationToken ct)
+    // ✅ orderedAt filter optional (incremental for orders)
+    public Task<JsonDocument> ListOrdersAsync(string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct)
     {
         const string op = "listOrder";
 
@@ -83,20 +100,79 @@ query listCustomer($page:Int!, $limit:Int!) {
         {
             operationName = op,
             query = @"
-query listOrder($page:Int!, $limit:Int!) {
-  listOrder(pagination: { page: $page, limit: $limit }) {
+query listOrder(
+  $pagination: PaginationInput,
+  $search: String,
+  $sort: String,
+  $status: OrderStatusEnumFilterInput,
+  $orderedAt: DateFilterInput
+) {
+  listOrder(
+    pagination: $pagination,
+    search: $search,
+    sort: $sort,
+    status: $status,
+    orderedAt: $orderedAt
+  ) {
+    count
+    page
+    limit
+    hasNext
     data {
       id
       orderNumber
       orderedAt
+      updatedAt
       status
       currencyCode
+      totalPrice
       totalFinalPrice
+
+      salesChannelId
+      salesChannel { id name type }
+
       customer { id email firstName lastName phone }
+
+      orderLineItems {
+        id
+        quantity
+        price
+        finalPrice
+        currencyCode
+        updatedAt
+        status
+        deleted
+        variant {
+          id
+          name
+          sku
+          productId
+          slug
+        }
+      }
     }
   }
 }",
-            variables = new { page, limit }
+            variables = new
+            {
+                pagination = new { page, limit },
+                search = (string?)null,
+                sort = "-orderedAt",
+                status = new
+                {
+                    @in = new[]
+                    {
+                        "CANCELLED",
+                        "CREATED",
+                        "PARTIALLY_CANCELLED",
+                        "PARTIALLY_REFUNDED",
+                        "REFUNDED",
+                        "REFUND_REJECTED",
+                        "REFUND_REQUESTED"
+                    }
+                },
+                orderedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
+            }
         };
 
         return PostAsync(accessToken, op, payload, ct);
@@ -104,7 +180,6 @@ query listOrder($page:Int!, $limit:Int!) {
 
     private async Task<JsonDocument> PostAsync(string accessToken, string op, object body, CancellationToken ct)
     {
-        // EXACT match with your curl style: /graphql?op=me
         var url = QueryHelpers.AddQueryString(_opts.GraphqlEndpoint, "op", op);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url);
@@ -126,16 +201,11 @@ query listOrder($page:Int!, $limit:Int!) {
             errors.ValueKind == JsonValueKind.Array &&
             errors.GetArrayLength() > 0)
         {
-            // Convert login required to clean domain error
             var first = errors[0];
             var msg = first.TryGetProperty("message", out var m) ? m.GetString() : null;
 
             if (string.Equals(msg, "LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ExternalServiceAuthException(
-                    provider: "ikas",
-                    message: "Ikas token invalid veya yetkisiz. Admin GraphQL token kullanmalısın (Authorization: Bearer <token>).");
-            }
+                throw new ExternalServiceAuthException("ikas", "Ikas token invalid veya yetkisiz.");
 
             throw new InvalidOperationException($"Ikas GraphQL errors: {errors}");
         }

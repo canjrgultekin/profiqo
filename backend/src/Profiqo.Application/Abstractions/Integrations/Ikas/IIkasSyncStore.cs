@@ -11,15 +11,27 @@ public sealed record IkasCustomerUpsert(
     string? PhoneNormalized,
     string? PhoneHashSha256);
 
+public sealed record IkasOrderLineUpsert(
+    string? Sku,
+    string ProductName,
+    int Quantity,
+    decimal UnitPrice,
+    decimal FinalPrice,
+    string CurrencyCode,
+    string? ProviderVariantId,
+    string? ProviderProductId);
+
 public sealed record IkasOrderUpsert(
     string ProviderOrderId,
     DateTimeOffset PlacedAtUtc,
+    long UpdatedAtMs,
     string CurrencyCode,
     decimal TotalFinalPrice,
     string? CustomerEmailNormalized,
     string? CustomerEmailHashSha256,
     string? CustomerPhoneNormalized,
-    string? CustomerPhoneHashSha256);
+    string? CustomerPhoneHashSha256,
+    IReadOnlyList<IkasOrderLineUpsert> Lines);
 
 public interface IIkasSyncStore
 {

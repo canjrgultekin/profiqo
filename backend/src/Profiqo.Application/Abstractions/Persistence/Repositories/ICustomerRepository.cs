@@ -11,7 +11,7 @@ public interface ICustomerRepository
     Task<Customer?> FindByIdentityHashAsync(
         TenantId tenantId,
         IdentityType identityType,
-        string valueHash,
+        IdentityHash valueHash,
         CancellationToken cancellationToken);
 
 

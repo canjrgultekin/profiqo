@@ -1,5 +1,6 @@
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Tenancy;
+using Profiqo.Application.Customers.IdentityResolution;
 using Profiqo.Application.Integrations.Ikas;
 using Profiqo.Infrastructure.Integrations.Ikas;
 using Profiqo.Infrastructure.Persistence;
@@ -24,6 +25,9 @@ builder.Services.AddScoped<ISecretProtector, AesGcmSecretProtector>();
 // Infra + Ikas
 builder.Services.AddProfiqoPersistence(builder.Configuration);
 builder.Services.AddIkasIntegration(builder.Configuration);
+
+// ✅ Application core services (without MediatR)
+builder.Services.AddIdentityResolution();
 
 // Sync processor (no MediatR)
 builder.Services.AddScoped<IIkasSyncProcessor, IkasSyncProcessor>();

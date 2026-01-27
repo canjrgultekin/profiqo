@@ -1,5 +1,7 @@
 ﻿using MediatR;
 
+using Microsoft.EntityFrameworkCore;
+
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
@@ -48,33 +50,47 @@ internal sealed class ConnectIkasCommandHandler : IRequestHandler<ConnectIkasCom
                 ["accessToken"] = new[] { "AccessToken required." }
             });
 
-        // ✅ Validate token BEFORE persisting
+        // Validate token before persisting
         _ = await _ikas.MeAsync(token, ct);
-
-        var existing = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Ikas, ct);
 
         var enc = _secrets.Protect(token);
         var now = DateTimeOffset.UtcNow;
 
-        if (existing is null)
+        // Try twice to handle optimistic concurrency (worker may touch same row)
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var created = ProviderConnection.Create(
-                tenantId: tenantId.Value,
-                providerType: ProviderType.Ikas,
-                displayName: label,
-                externalAccountId: request.StoreDomain?.Trim(),
-                accessToken: enc,
-                refreshToken: null,
-                accessTokenExpiresAtUtc: null,
-                nowUtc: now);
+            try
+            {
+                var existing = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Ikas, ct);
 
-            await _connections.AddAsync(created, ct);
-            return created.Id.Value;
+                if (existing is null)
+                {
+                    var created = ProviderConnection.Create(
+                        tenantId: tenantId.Value,
+                        providerType: ProviderType.Ikas,
+                        displayName: label,
+                        externalAccountId: request.StoreDomain?.Trim(),
+                        accessToken: enc,
+                        refreshToken: null,
+                        accessTokenExpiresAtUtc: null,
+                        nowUtc: now);
+
+                    await _connections.AddAsync(created, ct);
+                    return created.Id.Value;
+                }
+
+                existing.UpdateProfile(label, request.StoreDomain?.Trim(), now);
+                existing.RotateTokens(enc, null, null, now);
+
+                return existing.Id.Value;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt == 1)
+            {
+                // Reload and retry once
+                await _connections.ClearTrackingAsync(ct);
+            }
         }
 
-        existing.UpdateProfile(label, request.StoreDomain?.Trim(), now);
-        existing.RotateTokens(enc, null, null, now);
-
-        return existing.Id.Value;
+        throw new ConflictException("concurrency_conflict = Connection was updated concurrently. Please retry.");
     }
 }
