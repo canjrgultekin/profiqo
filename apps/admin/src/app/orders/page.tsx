@@ -9,14 +9,10 @@ type OrderRow = {
   status: string;
   providerOrderId: string | null;
   placedAtUtc: string;
-  completedAtUtc: string | null;
-
   totalAmount: number;
   totalCurrency: string;
-
   netProfit: number;
   netProfitCurrency: string;
-
   lineCount: number;
 };
 
@@ -45,20 +41,12 @@ export default function OrdersPage() {
     setLoading(true);
     setErr(null);
 
-    const qs = new URLSearchParams({
-      page: String(page),
-      pageSize: String(pageSize),
-    });
-
+    const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (q.trim()) qs.set("q", q.trim());
 
     try {
-      const res = await fetch(`/api/orders?${qs.toString()}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const payload = (await res.json().catch(() => null)) as OrdersResponse | any;
+      const res = await fetch(`/api/orders?${qs.toString()}`, { method: "GET", cache: "no-store" });
+      const payload = await res.json().catch(() => null);
 
       if (!res.ok) {
         setErr(payload?.message || "Orders load failed.");
@@ -75,10 +63,7 @@ export default function OrdersPage() {
     }
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  useEffect(() => { load(); }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="p-4 sm:p-6">
@@ -94,10 +79,7 @@ export default function OrdersPage() {
         </div>
 
         <button
-          onClick={() => {
-            setPage(1);
-            load();
-          }}
+          onClick={() => { setPage(1); load(); }}
           className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90 disabled:opacity-60"
           disabled={loading}
         >
@@ -114,9 +96,7 @@ export default function OrdersPage() {
       <div className="rounded-[10px] bg-white p-4 shadow-1 dark:bg-gray-dark dark:shadow-card">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-dark dark:text-white">Orders</h2>
-          <div className="text-sm text-body-color dark:text-dark-6">
-            {data ? `${data.total} total` : ""}
-          </div>
+          <div className="text-sm text-body-color dark:text-dark-6">{data ? `${data.total} total` : ""}</div>
         </div>
 
         <div className="overflow-x-auto">
@@ -127,58 +107,37 @@ export default function OrdersPage() {
                 <th className="px-3 py-2">Channel</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Total</th>
-                <th className="px-3 py-2">Profit</th>
                 <th className="px-3 py-2">Placed</th>
               </tr>
             </thead>
             <tbody>
-              {loading && (
-                <tr>
-                  <td className="px-3 py-3 text-sm" colSpan={6}>
-                    Loading...
-                  </td>
-                </tr>
-              )}
+              {loading && <tr><td className="px-3 py-3 text-sm" colSpan={5}>Loading...</td></tr>}
 
               {!loading && data?.items?.length ? (
                 data.items.map((x) => (
                   <tr key={x.orderId} className="border-t border-stroke dark:border-dark-3">
                     <td className="px-3 py-3 text-sm text-dark dark:text-white">
-                      <div className="font-medium">{x.providerOrderId || x.orderId}</div>
-                      <div className="text-xs text-body-color dark:text-dark-6">{x.customerId}</div>
+                      <a className="underline" href={`/orders/${x.orderId}`}>
+                        {x.providerOrderId || x.orderId}
+                      </a>
                     </td>
                     <td className="px-3 py-3 text-sm">{x.channel}</td>
                     <td className="px-3 py-3 text-sm">{x.status}</td>
-                    <td className="px-3 py-3 text-sm">
-                      {x.totalAmount} {x.totalCurrency}
-                    </td>
-                    <td className="px-3 py-3 text-sm">
-                      {x.netProfit} {x.netProfitCurrency}
-                    </td>
-                    <td className="px-3 py-3 text-sm">
-                      {new Date(x.placedAtUtc).toLocaleString()}
-                    </td>
+                    <td className="px-3 py-3 text-sm">{x.totalAmount} {x.totalCurrency}</td>
+                    <td className="px-3 py-3 text-sm">{new Date(x.placedAtUtc).toLocaleString()}</td>
                   </tr>
                 ))
               ) : (
-                !loading && (
-                  <tr>
-                    <td className="px-3 py-3 text-sm" colSpan={6}>
-                      No orders.
-                    </td>
-                  </tr>
-                )
+                !loading && <tr><td className="px-3 py-3 text-sm" colSpan={5}>No orders.</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         <div className="mt-4 flex items-center justify-between">
-          <button
-            className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
+          <button className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={loading || page <= 1}
-          >
+            disabled={loading || page <= 1}>
             Prev
           </button>
 
@@ -186,11 +145,9 @@ export default function OrdersPage() {
             Page {page} / {totalPages}
           </div>
 
-          <button
-            className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
+          <button className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={loading || page >= totalPages}
-          >
+            disabled={loading || page >= totalPages}>
             Next
           </button>
         </div>

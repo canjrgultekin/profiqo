@@ -1,3 +1,4 @@
+// Path: apps/admin/src/app/settings/users/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -7,9 +8,18 @@ type UserItem = {
   email: string;
   displayName: string;
   status: string;
-  roles: string[];
+  roles: string[] | string | null;
   createdAtUtc: string;
 };
+
+function normalizeRoles(r: UserItem["roles"]): string[] {
+  if (!r) return [];
+  if (Array.isArray(r)) return r.filter(Boolean);
+  const s = String(r).trim();
+  if (!s) return [];
+  // "Admin,Reporting" gibi gelirse split et
+  return s.split(",").map((x) => x.trim()).filter(Boolean);
+}
 
 export default function TenantUsersPage() {
   const [items, setItems] = useState<UserItem[]>([]);
@@ -33,7 +43,19 @@ export default function TenantUsersPage() {
       return;
     }
 
-    setItems(payload?.items || []);
+    const raw = payload?.items || [];
+    const mapped: UserItem[] = Array.isArray(raw)
+      ? raw.map((u: any) => ({
+          userId: u?.userId ?? u?.UserId ?? "",
+          email: u?.email ?? u?.Email ?? "",
+          displayName: u?.displayName ?? u?.DisplayName ?? "",
+          status: u?.status ?? u?.Status ?? "",
+          roles: u?.roles ?? u?.Roles ?? null,
+          createdAtUtc: u?.createdAtUtc ?? u?.CreatedAtUtc ?? "",
+        }))
+      : [];
+
+    setItems(mapped);
   };
 
   useEffect(() => {
@@ -84,23 +106,40 @@ export default function TenantUsersPage() {
         )}
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <input className="rounded-lg border border-stroke bg-transparent px-3 py-2" placeholder="email"
-            value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className="rounded-lg border border-stroke bg-transparent px-3 py-2" placeholder="display name"
-            value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-          <input className="rounded-lg border border-stroke bg-transparent px-3 py-2" placeholder="password (min 8)"
+          <input
+            className="rounded-lg border border-stroke bg-transparent px-3 py-2 text-dark dark:text-white dark:border-dark-3"
+            placeholder="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+          <input
+            className="rounded-lg border border-stroke bg-transparent px-3 py-2 text-dark dark:text-white dark:border-dark-3"
+            placeholder="display name"
+            value={form.displayName}
+            onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+          />
+          <input
+            className="rounded-lg border border-stroke bg-transparent px-3 py-2 text-dark dark:text-white dark:border-dark-3"
+            placeholder="password (min 8)"
             type="password"
-            value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <select className="rounded-lg border border-stroke bg-transparent px-3 py-2"
-            value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+          <select
+            className="rounded-lg border border-stroke bg-transparent px-3 py-2 text-dark dark:text-white dark:border-dark-3"
+            value={form.role}
+            onChange={(e) => setForm({ ...form, role: e.target.value })}
+          >
             <option value="Admin">Admin</option>
             <option value="Integration">Integration</option>
             <option value="Reporting">Reporting</option>
           </select>
         </div>
 
-        <button onClick={createUser}
-          className="mt-3 rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90">
+        <button
+          onClick={createUser}
+          className="mt-3 rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90"
+        >
           Kullanıcı Oluştur
         </button>
 
@@ -116,30 +155,40 @@ export default function TenantUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((u) => (
-                <tr key={u.userId} className="border-t border-stroke dark:border-dark-3 text-sm">
-                  <td className="px-2 py-2">{u.email}</td>
-                  <td className="px-2 py-2">{u.displayName}</td>
-                  <td className="px-2 py-2">{u.roles.join(", ")}</td>
-                  <td className="px-2 py-2">{u.status}</td>
-                  <td className="px-2 py-2">
-                    {u.status === "Active" ? (
-                      <button className="rounded border px-2 py-1" onClick={() => disable(u.userId)}>Disable</button>
-                    ) : (
-                      <button className="rounded border px-2 py-1" onClick={() => activate(u.userId)}>Activate</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {items.map((u) => {
+                const rolesArr = normalizeRoles(u.roles);
+
+                return (
+                  <tr key={u.userId} className="border-t border-stroke dark:border-dark-3 text-sm">
+                    <td className="px-2 py-2">{u.email}</td>
+                    <td className="px-2 py-2">{u.displayName}</td>
+                    <td className="px-2 py-2">{rolesArr.length ? rolesArr.join(", ") : "-"}</td>
+                    <td className="px-2 py-2">{u.status}</td>
+                    <td className="px-2 py-2">
+                      {u.status === "Active" ? (
+                        <button className="rounded border px-2 py-1" onClick={() => disable(u.userId)}>
+                          Disable
+                        </button>
+                      ) : (
+                        <button className="rounded border px-2 py-1" onClick={() => activate(u.userId)}>
+                          Activate
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
               {!items.length && (
                 <tr className="border-t border-stroke dark:border-dark-3 text-sm">
-                  <td className="px-2 py-3" colSpan={5}>No users</td>
+                  <td className="px-2 py-3" colSpan={5}>
+                    No users
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   );

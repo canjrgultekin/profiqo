@@ -42,16 +42,11 @@ export default function CustomersPage() {
       page: String(page),
       pageSize: String(pageSize),
     });
-
     if (q.trim()) qs.set("q", q.trim());
 
     try {
-      const res = await fetch(`/api/customers?${qs.toString()}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      const payload = (await res.json().catch(() => null)) as CustomersResponse | any;
+      const res = await fetch(`/api/customers?${qs.toString()}`, { method: "GET", cache: "no-store" });
+      const payload = (await res.json().catch(() => null)) as any;
 
       if (!res.ok) {
         setErr(payload?.message || "Customers load failed.");
@@ -68,10 +63,7 @@ export default function CustomersPage() {
     }
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  useEffect(() => { load(); }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="p-4 sm:p-6">
@@ -87,10 +79,7 @@ export default function CustomersPage() {
         </div>
 
         <button
-          onClick={() => {
-            setPage(1);
-            load();
-          }}
+          onClick={() => { setPage(1); load(); }}
           className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90 disabled:opacity-60"
           disabled={loading}
         >
@@ -107,9 +96,7 @@ export default function CustomersPage() {
       <div className="rounded-[10px] bg-white p-4 shadow-1 dark:bg-gray-dark dark:shadow-card">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-dark dark:text-white">Customers</h2>
-          <div className="text-sm text-body-color dark:text-dark-6">
-            {data ? `${data.total} total` : ""}
-          </div>
+          <div className="text-sm text-body-color dark:text-dark-6">{data ? `${data.total} total` : ""}</div>
         </div>
 
         <div className="overflow-x-auto">
@@ -125,34 +112,26 @@ export default function CustomersPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr>
-                  <td className="px-3 py-3 text-sm" colSpan={5}>
-                    Loading...
-                  </td>
-                </tr>
+                <tr><td className="px-3 py-3 text-sm" colSpan={5}>Loading...</td></tr>
               )}
 
               {!loading && data?.items?.length ? (
                 data.items.map((x) => (
                   <tr key={x.customerId} className="border-t border-stroke dark:border-dark-3">
                     <td className="px-3 py-3 text-sm text-dark dark:text-white">
-                      {(x.firstName || "") + " " + (x.lastName || "")}
+                      <a className="underline" href={`/customers/${x.customerId}`}>
+                        {`${x.firstName || ""} ${x.lastName || ""}`.trim() || x.customerId}
+                      </a>
                     </td>
                     <td className="px-3 py-3 text-sm">{x.rfmSegment || "-"}</td>
                     <td className="px-3 py-3 text-sm">{x.churnRisk ?? "-"}</td>
                     <td className="px-3 py-3 text-sm">{x.ltv12mProfit ?? "-"}</td>
-                    <td className="px-3 py-3 text-sm">
-                      {new Date(x.lastSeenAtUtc).toLocaleString()}
-                    </td>
+                    <td className="px-3 py-3 text-sm">{new Date(x.lastSeenAtUtc).toLocaleString()}</td>
                   </tr>
                 ))
               ) : (
                 !loading && (
-                  <tr>
-                    <td className="px-3 py-3 text-sm" colSpan={5}>
-                      No customers.
-                    </td>
-                  </tr>
+                  <tr><td className="px-3 py-3 text-sm" colSpan={5}>No customers.</td></tr>
                 )
               )}
             </tbody>
@@ -160,11 +139,9 @@ export default function CustomersPage() {
         </div>
 
         <div className="mt-4 flex items-center justify-between">
-          <button
-            className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
+          <button className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={loading || page <= 1}
-          >
+            disabled={loading || page <= 1}>
             Prev
           </button>
 
@@ -172,11 +149,9 @@ export default function CustomersPage() {
             Page {page} / {totalPages}
           </div>
 
-          <button
-            className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
+          <button className="rounded-lg border border-stroke px-3 py-2 text-sm dark:border-dark-3"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={loading || page >= totalPages}
-          >
+            disabled={loading || page >= totalPages}>
             Next
           </button>
         </div>

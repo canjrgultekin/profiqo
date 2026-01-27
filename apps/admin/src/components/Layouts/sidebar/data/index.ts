@@ -4,23 +4,9 @@ export const NAV_DATA = [
   {
     label: "MAIN MENU",
     items: [
-      {
-        title: "Dashboard",
-        icon: Icons.HomeIcon,
-        items: [{ title: "eCommerce", url: "/" }],
-      },
-      {
-        title: "Customers",
-        url: "/customers",
-        icon: Icons.User,
-        items: [],
-      },
-      {
-        title: "Orders",
-        url: "/orders",
-        icon: Icons.Table,
-        items: [],
-      },
+      { title: "Dashboard", icon: Icons.HomeIcon, items: [{ title: "eCommerce", url: "/" }] },
+      { title: "Customers", url: "/customers", icon: Icons.User, items: [] },
+      { title: "Orders", url: "/orders", icon: Icons.Table, items: [] },
       {
         title: "Integrations",
         icon: Icons.Alphabet,
@@ -32,9 +18,7 @@ export const NAV_DATA = [
       {
         title: "Settings",
         icon: Icons.Alphabet,
-        items: [
-          { title: "Users", url: "/settings/users" },
-        ],
+        items: [{ title: "Users", url: "/settings/users" }],
       },
     ],
   },
