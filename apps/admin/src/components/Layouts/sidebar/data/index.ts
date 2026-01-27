@@ -24,10 +24,11 @@ export const NAV_DATA = [
         items: [],
       },
       {
-        title: "Calendar",
-        url: "/calendar",
-        icon: Icons.Calendar,
-        items: [],
+        title: "Integrations",
+        icon: Icons.Alphabet,
+        items: [
+          { title: "Ikas", url: "/integrations/ikas" },
+        ],
       },
       {
         title: "Profile",

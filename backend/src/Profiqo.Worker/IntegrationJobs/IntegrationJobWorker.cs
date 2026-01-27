@@ -54,17 +54,18 @@ internal sealed class IntegrationJobWorker : BackgroundService
 
                     if (job.Kind == IntegrationJobKind.IkasSyncCustomers)
                     {
-                        processed = await ikas.SyncCustomersAsync(tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
+                        processed = await ikas.SyncCustomersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     }
                     else if (job.Kind == IntegrationJobKind.IkasSyncOrders)
                     {
-                        processed = await ikas.SyncOrdersAsync(tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
+                        processed = await ikas.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     }
                     else
                     {
                         throw new InvalidOperationException($"Unsupported job kind: {job.Kind}");
                     }
 
+                    // Processor already reports progress per page, keep final mark as well
                     await jobs.MarkProgressAsync(job.JobId, processed, stoppingToken);
                     await jobs.MarkSucceededAsync(job.JobId, stoppingToken);
 

@@ -4,6 +4,7 @@ using System.Text.Json;
 
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
+using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Integrations;
@@ -12,8 +13,8 @@ namespace Profiqo.Application.Integrations.Ikas;
 
 public interface IIkasSyncProcessor
 {
-    Task<int> SyncCustomersAsync(TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
-    Task<int> SyncOrdersAsync(TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
+    Task<int> SyncCustomersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
+    Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
 }
 
 public sealed class IkasSyncProcessor : IIkasSyncProcessor
@@ -22,20 +23,23 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
     private readonly ISecretProtector _secrets;
     private readonly IIkasGraphqlClient _ikas;
     private readonly IIkasSyncStore _store;
+    private readonly IIntegrationJobRepository _jobs;
 
     public IkasSyncProcessor(
         IProviderConnectionRepository connections,
         ISecretProtector secrets,
         IIkasGraphqlClient ikas,
-        IIkasSyncStore store)
+        IIkasSyncStore store,
+        IIntegrationJobRepository jobs)
     {
         _connections = connections;
         _secrets = secrets;
         _ikas = ikas;
         _store = store;
+        _jobs = jobs;
     }
 
-    public async Task<int> SyncCustomersAsync(TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
+    public async Task<int> SyncCustomersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
     {
         var conn = await _connections.GetByIdAsync(new ProviderConnectionId(connectionId), ct);
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
@@ -78,12 +82,15 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 await _store.UpsertCustomerAsync(tenantId, model, ct);
                 processed++;
             }
+
+            // ✅ Live progress: update after each page
+            await _jobs.MarkProgressAsync(jobId, processed, ct);
         }
 
         return processed;
     }
 
-    public async Task<int> SyncOrdersAsync(TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
+    public async Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
     {
         var conn = await _connections.GetByIdAsync(new ProviderConnectionId(connectionId), ct);
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
@@ -146,6 +153,9 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 await _store.UpsertOrderAsync(tenantId, model, ct);
                 processed++;
             }
+
+            // ✅ Live progress: update after each page
+            await _jobs.MarkProgressAsync(jobId, processed, ct);
         }
 
         return processed;
