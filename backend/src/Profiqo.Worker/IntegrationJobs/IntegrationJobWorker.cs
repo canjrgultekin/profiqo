@@ -1,10 +1,10 @@
-// Path: backend/src/Profiqo.Worker/IntegrationJobs/IntegrationJobWorker.cs
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Integrations.Ikas;
 using Profiqo.Application.Integrations.Jobs;
+using Profiqo.Application.Integrations.Trendyol;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Worker.Tenancy;
 
@@ -34,7 +34,9 @@ internal sealed class IntegrationJobWorker : BackgroundService
 
                 var tenantSetter = scope.ServiceProvider.GetRequiredService<ITenantContextSetter>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IIntegrationJobRepository>();
+
                 var ikas = scope.ServiceProvider.GetRequiredService<IIkasSyncProcessor>();
+                var trendyol = scope.ServiceProvider.GetRequiredService<ITrendyolSyncProcessor>();
 
                 var job = await jobs.TryClaimNextAsync(_workerId, stoppingToken);
 
@@ -54,21 +56,15 @@ internal sealed class IntegrationJobWorker : BackgroundService
                     var processed = 0;
 
                     if (job.Kind == IntegrationJobKind.IkasSyncCustomers)
-                    {
                         processed = await ikas.SyncCustomersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
-                    }
                     else if (job.Kind == IntegrationJobKind.IkasSyncOrders)
-                    {
                         processed = await ikas.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
-                    }
                     else if (job.Kind == IntegrationJobKind.IkasSyncAbandonedCheckouts)
-                    {
                         processed = await ikas.SyncAbandonedCheckoutsAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
-                    }
+                    else if (job.Kind == IntegrationJobKind.TrendyolSyncOrders)
+                        processed = await trendyol.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     else
-                    {
                         throw new InvalidOperationException($"Unsupported job kind: {job.Kind}");
-                    }
 
                     await jobs.MarkProgressAsync(job.JobId, processed, stoppingToken);
                     await jobs.MarkSucceededAsync(job.JobId, stoppingToken);

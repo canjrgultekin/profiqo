@@ -1,10 +1,15 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Confluent.Kafka;
+
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 using Profiqo.Application.Abstractions.Id;
+using Profiqo.Application.Abstractions.Integrations.Trendyol;
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
+using Profiqo.Application.Integrations.Trendyol;
+using Profiqo.Infrastructure.Integrations.Trendyol;
 using Profiqo.Infrastructure.Persistence.Interceptors;
 using Profiqo.Infrastructure.Persistence.Repositories;
 using Profiqo.Infrastructure.Services;
@@ -55,6 +60,12 @@ public static class DependencyInjection
         services.AddScoped<Profiqo.Application.Abstractions.Persistence.Repositories.ICustomerRepository, Profiqo.Infrastructure.Persistence.Repositories.CustomerRepository>();
         services.AddScoped<Profiqo.Application.Abstractions.Persistence.IIntegrationCursorRepository, Profiqo.Infrastructure.Persistence.Repositories.IntegrationCursorRepository>();
         services.AddScoped<Profiqo.Application.Abstractions.Persistence.Repositories.ITenantUserRepository, Profiqo.Infrastructure.Persistence.Repositories.TenantUserRepository>();
+
+        services.Configure<TrendyolOptions>(configuration.GetSection("Profiqo:Integrations:Trendyol"));
+
+        services.AddHttpClient<ITrendyolClient, TrendyolClient>();
+        services.AddScoped<ITrendyolSyncStore, TrendyolSyncStore>();
+        services.AddScoped<ITrendyolSyncProcessor, TrendyolSyncProcessor>();
 
         return services;
     }

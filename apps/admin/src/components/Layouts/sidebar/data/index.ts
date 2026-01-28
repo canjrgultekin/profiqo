@@ -1,3 +1,4 @@
+// Path: apps/admin/src/components/Layouts/sidebar/data/index.ts
 import * as Icons from "../icons";
 
 export const NAV_DATA = [
@@ -10,9 +11,7 @@ export const NAV_DATA = [
       {
         title: "Reports",
         icon: Icons.Alphabet,
-        items: [
-          { title: "Abandoned Carts", url: "/reports/abandoned-carts" },
-        ],
+        items: [{ title: "Abandoned Carts", url: "/reports/abandoned-carts" }],
       },
       {
         title: "Integrations",
@@ -20,6 +19,7 @@ export const NAV_DATA = [
         items: [
           { title: "Overview", url: "/integrations" },
           { title: "Ikas", url: "/integrations/ikas" },
+          { title: "Trendyol", url: "/integrations/trendyol" }
         ],
       },
       {
