@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Headers;
+﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Ikas/IkasGraphqlClient.cs
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -31,7 +32,6 @@ internal sealed class IkasGraphqlClient : IIkasGraphqlClient
     public async Task<string> MeAsync(string accessToken, CancellationToken ct)
     {
         const string op = "me";
-
         var payload = new
         {
             operationName = op,
@@ -44,7 +44,6 @@ internal sealed class IkasGraphqlClient : IIkasGraphqlClient
         return id ?? throw new InvalidOperationException("Ikas me.id missing.");
     }
 
-    // ✅ NO updatedAt filter (as you verified)
     public Task<JsonDocument> ListCustomersAsync(string accessToken, int page, int limit, CancellationToken ct)
     {
         const string op = "listCustomer";
@@ -73,10 +72,10 @@ query listCustomer(
       firstName
       lastName
       phone
-      orderCount
-      totalOrderPrice
       updatedAt
       createdAt
+      orderCount
+      totalOrderPrice
     }
   }
 }",
@@ -91,7 +90,6 @@ query listCustomer(
         return PostAsync(accessToken, op, payload, ct);
     }
 
-    // ✅ orderedAt filter optional (incremental for orders)
     public Task<JsonDocument> ListOrdersAsync(string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct)
     {
         const string op = "listOrder";
@@ -127,12 +125,7 @@ query listOrder(
       currencyCode
       totalPrice
       totalFinalPrice
-
-      salesChannelId
-      salesChannel { id name type }
-
       customer { id email firstName lastName phone }
-
       orderLineItems {
         id
         quantity
@@ -142,13 +135,7 @@ query listOrder(
         updatedAt
         status
         deleted
-        variant {
-          id
-          name
-          sku
-          productId
-          slug
-        }
+        variant { id name sku productId slug }
       }
     }
   }
@@ -172,6 +159,73 @@ query listOrder(
                     }
                 },
                 orderedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
+            }
+        };
+
+        return PostAsync(accessToken, op, payload, ct);
+    }
+
+    // ✅ FIX: Cart has totalPrice, not totalFinalPrice
+    public Task<JsonDocument> ListAbandonedCheckoutsAsync(string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct)
+    {
+        const string op = "listAbandonedCheckouts";
+
+        var payload = new
+        {
+            operationName = op,
+            query = @"
+query listAbandonedCheckouts (
+  $customerId: StringFilterInput,
+  $id: StringFilterInput,
+  $input: ListAbandonedCartInput!,
+  $lastActivityDate: DateFilterInput,
+  $mailSendDate: DateFilterInput,
+  $pagination: PaginationInput,
+  $sort: String
+) {
+  listAbandonedCheckouts (
+    customerId: $customerId,
+    id: $id,
+    input: $input,
+    lastActivityDate: $lastActivityDate,
+    mailSendDate: $mailSendDate,
+    pagination: $pagination,
+    sort: $sort
+  ) {
+    count
+    page
+    limit
+    hasNext
+    data {
+      id
+      orderNumber
+      status
+      recoveryStatus
+      recoverEmailStatus
+      updatedAt
+
+      customer { email firstName lastName phone }
+
+      cart {
+        id
+        lastActivityDate
+        currencyCode
+        totalPrice
+        updatedAt
+        itemCount
+      }
+    }
+  }
+}",
+            variables = new
+            {
+                customerId = (object?)null,
+                id = (object?)null,
+                input = new { },
+                lastActivityDate = lastActivityGteMs.HasValue ? new { gte = lastActivityGteMs.Value } : null,
+                mailSendDate = (object?)null,
+                pagination = new { page, limit },
+                sort = "-lastActivityDate"
             }
         };
 

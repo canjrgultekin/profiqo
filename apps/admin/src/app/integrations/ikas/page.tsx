@@ -1,8 +1,9 @@
+// Path: apps/admin/src/app/integrations/ikas/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-type SyncScope = "customers" | "orders" | "both";
+type SyncScope = "customers" | "orders" | "abandoned" | "both";
 
 type StartSyncResponse = {
   batchId: string;
@@ -85,6 +86,8 @@ export default function IkasIntegrationPage() {
 
   const [pageSize, setPageSize] = useState(50);
   const [maxPages, setMaxPages] = useState(20);
+
+  // Default "both" now means: Customers + Orders + Abandoned
   const [scope, setScope] = useState<SyncScope>("both");
 
   const anyRunning = useMemo(() => {
@@ -92,7 +95,6 @@ export default function IkasIntegrationPage() {
     return jobs.some((j) => j.status === "Queued" || j.status === "Running");
   }, [batch]);
 
-  // ✅ Load existing connection on page load
   useEffect(() => {
     let cancelled = false;
 
@@ -122,7 +124,6 @@ export default function IkasIntegrationPage() {
       setStoreLabel(payload?.displayName ?? payload?.DisplayName ?? "");
       setStoreDomain(payload?.externalAccountId ?? payload?.ExternalAccountId ?? "");
 
-      // token asla plaintext gösterilmez
       setAccessToken("");
 
       append(`Existing Ikas connection loaded. connectionId=${cid}`);
@@ -140,7 +141,6 @@ export default function IkasIntegrationPage() {
     setBatchId(null);
     setBatch(null);
 
-    // Eğer mevcut connection varsa token update yapmak için token zorunlu
     if (hasExisting && !accessToken.trim()) {
       append("UPDATE TOKEN ERROR: Mevcut connection var. Token güncellemek için Access Token girmen lazım.");
       return;
@@ -162,8 +162,6 @@ export default function IkasIntegrationPage() {
     const cid = payload?.connectionId ?? payload?.ConnectionId;
     setConnectionId(cid);
     setHasExisting(true);
-
-    // token alanını temizle (DB’de şifreli duruyor)
     setAccessToken("");
 
     append(`${hasExisting ? "Updated" : "Connected"}. connectionId=${cid}`);
@@ -197,12 +195,7 @@ export default function IkasIntegrationPage() {
     const res = await fetch("/api/integrations/ikas/sync/start", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        connectionId,
-        scope,
-        pageSize,
-        maxPages,
-      }),
+      body: JSON.stringify({ connectionId, scope, pageSize, maxPages }),
     });
 
     const payload = await res.json().catch(() => null);
@@ -232,11 +225,7 @@ export default function IkasIntegrationPage() {
   };
 
   const fetchBatch = async (id: string) => {
-    const res = await fetch(`/api/integrations/ikas/jobs/batch/${id}`, {
-      method: "GET",
-      cache: "no-store",
-    });
-
+    const res = await fetch(`/api/integrations/ikas/jobs/batch/${id}`, { method: "GET", cache: "no-store" });
     const payload = await res.json().catch(() => null);
 
     if (!res.ok) {
@@ -269,9 +258,7 @@ export default function IkasIntegrationPage() {
 
     tick();
 
-    pollTimer.current = window.setInterval(() => {
-      tick();
-    }, 2000);
+    pollTimer.current = window.setInterval(() => tick(), 2000);
 
     return () => {
       cancelled = true;
@@ -323,18 +310,11 @@ export default function IkasIntegrationPage() {
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90"
-            onClick={connectOrUpdate}
-          >
+          <button className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90" onClick={connectOrUpdate}>
             {hasExisting ? "Update Token" : "Connect"}
           </button>
 
-          <button
-            className="rounded-lg border border-stroke px-4 py-2 text-dark dark:border-dark-3 dark:text-white"
-            onClick={test}
-            disabled={!connectionId}
-          >
+          <button className="rounded-lg border border-stroke px-4 py-2 text-dark dark:border-dark-3 dark:text-white" onClick={test} disabled={!connectionId}>
             Test Connection
           </button>
 
@@ -345,9 +325,10 @@ export default function IkasIntegrationPage() {
               onChange={(e) => setScope(e.target.value as SyncScope)}
               className="rounded-lg border border-stroke bg-transparent px-3 py-2 text-sm text-dark outline-none dark:border-dark-3 dark:text-white"
             >
-              <option value="both">Both</option>
+              <option value="both">All (Customers + Orders + Abandoned)</option>
               <option value="customers">Customers</option>
               <option value="orders">Orders</option>
+              <option value="abandoned">Abandoned Carts</option>
             </select>
 
             <label className="text-sm text-body-color dark:text-dark-6">PageSize</label>

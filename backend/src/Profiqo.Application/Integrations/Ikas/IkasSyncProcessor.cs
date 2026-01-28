@@ -9,12 +9,16 @@ using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Integrations;
 
+using static System.Reflection.Metadata.BlobBuilder;
+
 namespace Profiqo.Application.Integrations.Ikas;
 
 public interface IIkasSyncProcessor
 {
     Task<int> SyncCustomersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
     Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
+    Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
+
 }
 
 public sealed class IkasSyncProcessor : IIkasSyncProcessor
@@ -278,7 +282,125 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         return processed;
     }
 
-    private async Task<long?> GetCursorMsOrNull(TenantId tenantId, ProviderConnectionId connId, string key, CancellationToken ct)
+  
+
+public async Task<int> SyncAbandonedCheckoutsAsync(
+    Guid jobId,
+    TenantId tenantId,
+    Guid connectionId,
+    int pageSize,
+    int maxPages,
+    CancellationToken ct)
+{
+    var connId = new ProviderConnectionId(connectionId);
+    var conn = await _connections.GetByIdAsync(connId, ct);
+    if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
+        throw new InvalidOperationException("Ikas connection not found for tenant.");
+
+    var token = _secrets.Unprotect(conn.AccessToken);
+
+    const string cursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
+
+    var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
+
+    var cursorMs = await GetCursorMsOrNull(tenantId, connId, cursorKey, ct);
+    var gteMs = cursorMs ?? initialCutoffMs;
+
+    var processed = 0;
+    long maxSeen = cursorMs ?? 0;
+
+    for (var page = 1; page <= maxPages; page++)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        using var doc = await _ikas.ListAbandonedCheckoutsAsync(token, page, pageSize, gteMs, ct);
+
+        var list = doc.RootElement.GetProperty("data").GetProperty("listAbandonedCheckouts");
+        var data = list.GetProperty("data");
+
+        if (data.ValueKind != JsonValueKind.Array || data.GetArrayLength() == 0)
+            break;
+
+        var stopAll = false;
+
+        foreach (var a in data.EnumerateArray())
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var externalId = ReadString(a, "id") ?? Guid.NewGuid().ToString("N");
+            var status = ReadString(a, "status");
+
+            long lastActivity = 0;
+            string? currency = null;
+            decimal? totalPrice = null;
+
+            if (a.TryGetProperty("cart", out var cart) && cart.ValueKind == JsonValueKind.Object)
+            {
+                lastActivity = ReadInt64(cart, "lastActivityDate") ?? 0L;
+                currency = ReadString(cart, "currencyCode");
+                totalPrice = ReadDecimal(cart, "totalPrice"); // ✅ FIX
+            }
+
+            if (lastActivity <= 0)
+            {
+                var updatedAt = ReadInt64(a, "updatedAt") ?? 0L;
+                lastActivity = updatedAt > 0 ? updatedAt : nowMs;
+            }
+
+            if (lastActivity > 0 && lastActivity < gteMs)
+            {
+                stopAll = true;
+                break;
+            }
+
+            if (lastActivity > maxSeen) maxSeen = lastActivity;
+
+            string? email = null;
+            string? phone = null;
+
+            if (a.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
+            {
+                email = NormalizeEmail(ReadString(cust, "email"));
+                phone = NormalizePhone(ReadString(cust, "phone"));
+            }
+
+            var payloadJson = a.GetRawText();
+
+            await _store.UpsertAbandonedCheckoutAsync(
+                tenantId,
+                connId,
+                new IkasAbandonedCheckoutUpsert(
+                    ExternalId: externalId,
+                    LastActivityDateMs: lastActivity,
+                    CurrencyCode: currency,
+                    TotalFinalPrice: totalPrice, // we store it in TotalFinalPrice field for now (name is generic)
+                    Status: status,
+                    CustomerEmail: string.IsNullOrWhiteSpace(email) ? null : email,
+                    CustomerPhone: string.IsNullOrWhiteSpace(phone) ? null : phone,
+                    PayloadJson: payloadJson),
+                ct);
+
+            processed++;
+
+            if (processed % 25 == 0)
+                await _jobs.MarkProgressAsync(jobId, processed, ct);
+        }
+
+        await _jobs.MarkProgressAsync(jobId, processed, ct);
+
+        var hasNext = ReadBoolean(list, "hasNext");
+        if (!hasNext || stopAll) break;
+    }
+
+    var nextCursor = maxSeen > 0 ? (maxSeen + 1) : (nowMs + 1);
+    await _cursors.UpsertAsync(tenantId, connId, cursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
+
+    return processed;
+}
+
+
+private async Task<long?> GetCursorMsOrNull(TenantId tenantId, ProviderConnectionId connId, string key, CancellationToken ct)
     {
         var s = await _cursors.GetAsync(tenantId, connId, key, ct);
         if (long.TryParse(s, out var ms) && ms > 0)

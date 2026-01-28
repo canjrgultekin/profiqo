@@ -12,8 +12,10 @@ public enum IntegrationJobStatus : short
 public enum IntegrationJobKind : short
 {
     IkasSyncCustomers = 10,
-    IkasSyncOrders = 11
+    IkasSyncOrders = 11,
+    IkasSyncAbandonedCheckouts = 12
 }
+
 
 public sealed record IntegrationJobCreateRequest(
     Guid BatchId,

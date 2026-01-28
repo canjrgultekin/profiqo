@@ -8,6 +8,13 @@ export const NAV_DATA = [
       { title: "Customers", url: "/customers", icon: Icons.User, items: [] },
       { title: "Orders", url: "/orders", icon: Icons.Table, items: [] },
       {
+        title: "Reports",
+        icon: Icons.Alphabet,
+        items: [
+          { title: "Abandoned Carts", url: "/reports/abandoned-carts" },
+        ],
+      },
+      {
         title: "Integrations",
         icon: Icons.Alphabet,
         items: [

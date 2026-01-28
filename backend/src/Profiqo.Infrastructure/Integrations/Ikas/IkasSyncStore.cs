@@ -3,15 +3,16 @@
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Customers.IdentityResolution;
 using Profiqo.Domain.Common.Ids;
-using Profiqo.Domain.Customers;
-using Profiqo.Domain.Orders;
 using Profiqo.Domain.Common.Types;
+using Profiqo.Domain.Customers;
 using Profiqo.Domain.Integrations;
+using Profiqo.Domain.Orders;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Entities;
 
 namespace Profiqo.Infrastructure.Integrations.Ikas;
 
-internal sealed class IkasSyncStore : IIkasSyncStore
+public sealed class IkasSyncStore : IIkasSyncStore
 {
     private readonly ProfiqoDbContext _db;
     private readonly IIdentityResolutionService _resolver;
@@ -115,5 +116,79 @@ internal sealed class IkasSyncStore : IIkasSyncStore
         await _db.SaveChangesAsync(ct);
 
         return order.Id;
+    }
+
+    public async Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var providerType = (short)ProviderType.Ikas;
+
+        // 1) upsert abandoned_checkouts
+        var set = _db.Set<AbandonedCheckout>();
+        var existing = await set.FirstOrDefaultAsync(x =>
+            x.TenantId == tenantId.Value &&
+            x.ProviderType == providerType &&
+            x.ExternalId == model.ExternalId, ct);
+
+        if (existing is null)
+        {
+            var created = new AbandonedCheckout(
+                id: Guid.NewGuid(),
+                tenantId: tenantId.Value,
+                providerType: providerType,
+                externalId: model.ExternalId,
+                customerEmail: model.CustomerEmail,
+                customerPhone: model.CustomerPhone,
+                lastActivityDateMs: model.LastActivityDateMs,
+                currencyCode: model.CurrencyCode,
+                totalFinalPrice: model.TotalFinalPrice,
+                status: model.Status,
+                payloadJson: model.PayloadJson,
+                nowUtc: now);
+
+            await set.AddAsync(created, ct);
+        }
+        else
+        {
+            existing.Update(
+                customerEmail: model.CustomerEmail,
+                customerPhone: model.CustomerPhone,
+                lastActivityDateMs: model.LastActivityDateMs,
+                currencyCode: model.CurrencyCode,
+                totalFinalPrice: model.TotalFinalPrice,
+                status: model.Status,
+                payloadJson: model.PayloadJson,
+                nowUtc: now);
+        }
+
+        // 2) raw_events (dedupe by unique index)
+        var evtSet = _db.Set<RawEvent>();
+        var eventType = "cart_abandoned";
+        var externalId = model.ExternalId;
+
+        var rawExists = await evtSet.AsNoTracking().AnyAsync(x =>
+            x.TenantId == tenantId.Value &&
+            x.ProviderType == providerType &&
+            x.EventType == eventType &&
+            x.ExternalId == externalId, ct);
+
+        if (!rawExists)
+        {
+            var occurred = DateTimeOffset.FromUnixTimeMilliseconds(model.LastActivityDateMs);
+            var raw = new RawEvent(
+                id: Guid.NewGuid(),
+                tenantId: tenantId.Value,
+                providerType: providerType,
+                eventType: eventType,
+                externalId: externalId,
+                occurredAtUtc: occurred,
+                payloadJson: model.PayloadJson,
+                nowUtc: now);
+
+            await evtSet.AddAsync(raw, ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 }

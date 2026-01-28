@@ -42,6 +42,7 @@ public sealed class IntegrationsController : ControllerBase
         {
             var c1 = await _cursors.GetAsync(tenantId.Value, ikas.Id, "ikas.customers.updatedAt", ct);
             var c2 = await _cursors.GetAsync(tenantId.Value, ikas.Id, "ikas.orders.updatedAt", ct);
+            var c3 = await _cursors.GetAsync(tenantId.Value, ikas.Id, "ikas.abandoned.cursor.lastActivityDateMs", ct);
 
             result.Add(new
             {
@@ -53,7 +54,8 @@ public sealed class IntegrationsController : ControllerBase
                 cursors = new
                 {
                     customersUpdatedAtMs = c1,
-                    ordersUpdatedAtMs = c2
+                    ordersUpdatedAtMs = c2,
+                    abandonedLastActivityMs = c3
                 },
                 healthy = ikas.Status == ProviderConnectionStatus.Active
             });

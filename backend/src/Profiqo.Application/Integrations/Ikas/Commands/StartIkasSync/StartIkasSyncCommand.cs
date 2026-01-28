@@ -1,20 +1,15 @@
-﻿using Profiqo.Application.Common.Messaging;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Ikas/Commands/StartIkasSync/StartIkasSyncCommand.cs
+using MediatR;
 
 namespace Profiqo.Application.Integrations.Ikas.Commands.StartIkasSync;
 
-public enum IkasSyncScope : short
-{
-    Customers = 1,
-    Orders = 2,
-    Both = 3
-}
-
+// IMPORTANT: scope is carried as raw string to avoid enum-mapping mismatches.
 public sealed record StartIkasSyncCommand(
     Guid ConnectionId,
-    IkasSyncScope Scope,
+    string Scope,
     int? PageSize,
     int? MaxPages
-) : ICommand<StartIkasSyncResult>;
+) : IRequest<StartIkasSyncResult>;
 
 public sealed record StartIkasSyncResult(Guid BatchId, IReadOnlyList<StartIkasSyncJob> Jobs);
 

@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Ikas/Commands/StartIkasSync/StartIkasSyncCommandHandler.cs
+using MediatR;
 
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
@@ -39,10 +40,13 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
         var pageSize = request.PageSize is null or < 1 or > 200 ? 50 : request.PageSize.Value;
         var maxPages = request.MaxPages is null or < 1 or > 500 ? 20 : request.MaxPages.Value;
 
+        // Normalize scope string
+        var scope = (request.Scope ?? "both").Trim().ToLowerInvariant();
+
         var batchId = Guid.NewGuid();
         var created = new List<StartIkasSyncJob>();
 
-        if (request.Scope is IkasSyncScope.Customers or IkasSyncScope.Both)
+        if (scope is "customers" or "both")
         {
             var jobId = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
                 BatchId: batchId,
@@ -55,7 +59,7 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
             created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncCustomers)));
         }
 
-        if (request.Scope is IkasSyncScope.Orders or IkasSyncScope.Both)
+        if (scope is "orders" or "both")
         {
             var jobId = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
                 BatchId: batchId,
@@ -66,6 +70,53 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
                 MaxPages: maxPages), ct);
 
             created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncOrders)));
+        }
+
+        if (scope is "abandoned" or "both")
+        {
+            var jobId = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncAbandonedCheckouts,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
+
+            created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncAbandonedCheckouts)));
+        }
+
+        // Safety: unknown scope => default both
+        if (created.Count == 0)
+        {
+            var jobId1 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncCustomers,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
+
+            created.Add(new StartIkasSyncJob(jobId1, nameof(IntegrationJobKind.IkasSyncCustomers)));
+
+            var jobId2 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncOrders,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
+
+            created.Add(new StartIkasSyncJob(jobId2, nameof(IntegrationJobKind.IkasSyncOrders)));
+
+            var jobId3 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncAbandonedCheckouts,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
+
+            created.Add(new StartIkasSyncJob(jobId3, nameof(IntegrationJobKind.IkasSyncAbandonedCheckouts)));
         }
 
         return new StartIkasSyncResult(batchId, created);

@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿// Path: backend/src/Profiqo.Api/Controllers/IkasIntegrationController.cs
+using MediatR;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +18,6 @@ namespace Profiqo.Api.Controllers;
 [ApiController]
 [Route("api/integrations/ikas")]
 [Authorize(Policy = AuthorizationPolicies.IntegrationAccess)]
-
 public sealed class IkasIntegrationController : ControllerBase
 {
     private readonly ISender _sender;
@@ -37,7 +37,6 @@ public sealed class IkasIntegrationController : ControllerBase
         _connections = connections;
     }
 
-    // ✅ New: return existing ikas connection (token never returned)
     [HttpGet("connection")]
     public async Task<IActionResult> GetConnection(CancellationToken ct)
     {
@@ -84,16 +83,13 @@ public sealed class IkasIntegrationController : ControllerBase
     [HttpPost("sync/start")]
     public async Task<IActionResult> Start([FromBody] StartRequest req, CancellationToken ct)
     {
-        var scope = (req.Scope ?? "both").Trim().ToLowerInvariant();
+        // We pass raw scope string into the command (handler will normalize)
+        var scope = string.IsNullOrWhiteSpace(req.Scope) ? "both" : req.Scope;
 
-        var s = scope switch
-        {
-            "customers" => IkasSyncScope.Customers,
-            "orders" => IkasSyncScope.Orders,
-            _ => IkasSyncScope.Both
-        };
+        var result = await _sender.Send(
+            new StartIkasSyncCommand(req.ConnectionId, scope, req.PageSize, req.MaxPages),
+            ct);
 
-        var result = await _sender.Send(new StartIkasSyncCommand(req.ConnectionId, s, req.PageSize, req.MaxPages), ct);
         return Accepted(result);
     }
 
