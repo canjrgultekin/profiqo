@@ -1,0 +1,3 @@
+{
+  "/api/integrations/ikas/jobs/batch/[batchId]/route": "app/api/integrations/ikas/jobs/batch/[batchId]/route.js"
+}

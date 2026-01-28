@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 18, "column": 0}, "map": {"version":3,"sources":["file:///E:/source/canjrgultekin/profiqo/apps/admin/src/app/403/page.tsx"],"sourcesContent":["export default function ForbiddenPage() {\r\n  return (\r\n    <div className=\"p-6\">\r\n      <div className=\"rounded-[10px] bg-white p-6 shadow-1 dark:bg-gray-dark dark:shadow-card\">\r\n        <h1 className=\"text-xl font-semibold text-dark dark:text-white\">403 - Forbidden</h1>\r\n        <p className=\"mt-2 text-sm text-body-color dark:text-dark-6\">\r\n          Bu sayfayı görüntülemek için yetkin yok.\r\n        </p>\r\n      </div>\r\n    </div>\r\n  );\r\n}\r\n"],"names":[],"mappings":";;;;;;AAAe,SAAS;IACtB,qBACE,8OAAC;QAAI,WAAU;kBACb,cAAA,8OAAC;YAAI,WAAU;;8BACb,8OAAC;oBAAG,WAAU;8BAAkD;;;;;;8BAChE,8OAAC;oBAAE,WAAU;8BAAgD;;;;;;;;;;;;;;;;;AAMrE"}}]
+}

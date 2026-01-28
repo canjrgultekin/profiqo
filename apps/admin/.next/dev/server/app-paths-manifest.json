@@ -1,0 +1,14 @@
+{
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/integrations/ikas/connection/route": "app/api/integrations/ikas/connection/route.js",
+  "/api/integrations/ikas/jobs/batch/[batchId]/route": "app/api/integrations/ikas/jobs/batch/[batchId]/route.js",
+  "/api/integrations/ikas/sync/start/route": "app/api/integrations/ikas/sync/start/route.js",
+  "/api/integrations/ikas/test/route": "app/api/integrations/ikas/test/route.js",
+  "/api/reports/channel-breakdown/route": "app/api/reports/channel-breakdown/route.js",
+  "/api/reports/overview/route": "app/api/reports/overview/route.js",
+  "/api/tenant/users/route": "app/api/tenant/users/route.js",
+  "/auth/sign-in/page": "app/auth/sign-in/page.js",
+  "/integrations/ikas/page": "app/integrations/ikas/page.js",
+  "/page": "app/page.js",
+  "/settings/users/page": "app/settings/users/page.js"
+}

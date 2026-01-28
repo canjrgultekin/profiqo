@@ -1,0 +1,3 @@
+{
+  "/api/reports/abandoned-checkouts/route": "app/api/reports/abandoned-checkouts/route.js"
+}
