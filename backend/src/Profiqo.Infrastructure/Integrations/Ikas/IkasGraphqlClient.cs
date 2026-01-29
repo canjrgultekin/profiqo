@@ -90,6 +90,8 @@ query listCustomer(
         return PostAsync(accessToken, op, payload, ct);
     }
 
+    // ✅ Updated query: shippingAddress included, updatedAt filter included
+    // Signature stays the same to avoid breaking callers; orderedAtGteMs param is now used as updatedAt.gte
     public Task<JsonDocument> ListOrdersAsync(string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct)
     {
         const string op = "listOrder";
@@ -103,14 +105,14 @@ query listOrder(
   $search: String,
   $sort: String,
   $status: OrderStatusEnumFilterInput,
-  $orderedAt: DateFilterInput
+  $updatedAt: DateFilterInput
 ) {
   listOrder(
     pagination: $pagination,
     search: $search,
     sort: $sort,
     status: $status,
-    orderedAt: $orderedAt
+    updatedAt: $updatedAt
   ) {
     count
     page
@@ -125,7 +127,12 @@ query listOrder(
       currencyCode
       totalPrice
       totalFinalPrice
+
+      salesChannelId
+      salesChannel { id name type }
+
       customer { id email firstName lastName phone }
+
       orderLineItems {
         id
         quantity
@@ -136,6 +143,21 @@ query listOrder(
         status
         deleted
         variant { id name sku productId slug }
+      }
+
+      shippingAddress {
+        addressLine1
+        addressLine2
+        city { name code }
+        country { name code }
+        district { name code }
+        identityNumber
+        phone
+        postalCode
+        region { name }
+        state { name code }
+        taxNumber
+        taxOffice
       }
     }
   }
@@ -158,14 +180,13 @@ query listOrder(
                         "REFUND_REQUESTED"
                     }
                 },
-                orderedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
+                updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
             }
         };
 
         return PostAsync(accessToken, op, payload, ct);
     }
 
-    // ✅ FIX: Cart has totalPrice, not totalFinalPrice
     public Task<JsonDocument> ListAbandonedCheckoutsAsync(string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct)
     {
         const string op = "listAbandonedCheckouts";
@@ -203,17 +224,8 @@ query listAbandonedCheckouts (
       recoveryStatus
       recoverEmailStatus
       updatedAt
-
       customer { email firstName lastName phone }
-
-      cart {
-        id
-        lastActivityDate
-        currencyCode
-        totalPrice
-        updatedAt
-        itemCount
-      }
+      cart { id lastActivityDate currencyCode totalPrice updatedAt itemCount }
     }
   }
 }",

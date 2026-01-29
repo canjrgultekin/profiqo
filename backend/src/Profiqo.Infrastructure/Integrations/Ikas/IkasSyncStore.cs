@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Ikas/IkasSyncStore.cs
+using Microsoft.EntityFrameworkCore;
 
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Customers.IdentityResolution;
@@ -77,7 +78,7 @@ public sealed class IkasSyncStore : IIkasSyncStore
 
         var currency = new CurrencyCode(model.CurrencyCode);
 
-        // Create real order lines from Ikas orderLineItems
+        // ✅ FIX: OrderLine ctor unitPrice ister. Biz unitPrice olarak finalPrice’ı basıyoruz.
         var lines = new List<OrderLine>();
 
         if (model.Lines is not null && model.Lines.Count > 0)
@@ -85,18 +86,16 @@ public sealed class IkasSyncStore : IIkasSyncStore
             foreach (var l in model.Lines)
             {
                 var lineCurrency = new CurrencyCode(l.CurrencyCode);
-                var lineTotal = new Money(l.FinalPrice * l.Quantity, lineCurrency);
 
                 var sku = string.IsNullOrWhiteSpace(l.Sku) ? (l.ProviderVariantId ?? l.ProviderProductId ?? "unknown") : l.Sku!;
                 var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName;
 
-                // IMPORTANT: This assumes OrderLine ctor: (sku, productName, quantity, lineTotal)
-                lines.Add(new OrderLine(sku, name, l.Quantity, lineTotal));
+                var unitPriceMoney = new Money(l.FinalPrice, lineCurrency);
+                lines.Add(new OrderLine(sku, name, l.Quantity, unitPriceMoney));
             }
         }
         else
         {
-            // fallback
             lines.Add(new OrderLine("ikas", "ikas order", 1, new Money(model.TotalFinalPrice, currency)));
         }
 
@@ -113,6 +112,14 @@ public sealed class IkasSyncStore : IIkasSyncStore
             nowUtc: now);
 
         await _db.Orders.AddAsync(order, ct);
+
+        // ✅ NEW: shadow json columns
+        _db.Entry(order).Property("ShippingAddressJson").CurrentValue =
+            string.IsNullOrWhiteSpace(model.ShippingAddressJson) ? null : model.ShippingAddressJson;
+
+        _db.Entry(order).Property("BillingAddressJson").CurrentValue =
+            string.IsNullOrWhiteSpace(model.BillingAddressJson) ? null : model.BillingAddressJson;
+
         await _db.SaveChangesAsync(ct);
 
         return order.Id;
@@ -124,7 +131,6 @@ public sealed class IkasSyncStore : IIkasSyncStore
 
         var providerType = (short)ProviderType.Ikas;
 
-        // 1) upsert abandoned_checkouts
         var set = _db.Set<AbandonedCheckout>();
         var existing = await set.FirstOrDefaultAsync(x =>
             x.TenantId == tenantId.Value &&
@@ -162,7 +168,6 @@ public sealed class IkasSyncStore : IIkasSyncStore
                 nowUtc: now);
         }
 
-        // 2) raw_events (dedupe by unique index)
         var evtSet = _db.Set<RawEvent>();
         var eventType = "cart_abandoned";
         var externalId = model.ExternalId;

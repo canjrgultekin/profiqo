@@ -79,6 +79,15 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasColumnType("jsonb")
             .IsRequired();
 
+        // ✅ Address snapshots (shadow properties)
+        builder.Property<string?>("ShippingAddressJson")
+            .HasColumnName("shipping_address_json")
+            .HasColumnType("jsonb");
+
+        builder.Property<string?>("BillingAddressJson")
+            .HasColumnName("billing_address_json")
+            .HasColumnType("jsonb");
+
         // OrderLines - FK tipi düzeltildi
         builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
         builder.OwnsMany(x => x.Lines, l =>

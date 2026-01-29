@@ -52,9 +52,8 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 
         var sellerId = conn.ExternalAccountId ?? throw new InvalidOperationException("SellerId missing.");
         var credsJson = _secrets.Unprotect(conn.AccessToken);
-        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Invalid credentials");
+        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Trendyol credentials invalid.");
 
-        // Cursor: last seen orderDateMs
         var cursorRaw = await _cursors.GetAsync(tenantId, connId, CursorKey, ct);
         long? cursorMs = long.TryParse(cursorRaw, out var c) && c > 0 ? c : null;
 
@@ -93,7 +92,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
             {
                 ct.ThrowIfCancellationRequested();
 
-                // shipmentPackageId is NUMBER in real payload -> read as string safely
                 var shipmentPackageId =
                     ReadStringOrNumber(o, "shipmentPackageId") ??
                     ReadStringOrNumber(o, "id") ??
@@ -109,20 +107,26 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 var orderDateUtc = DateTimeOffset.FromUnixTimeMilliseconds(orderDateMs);
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
-
-                // totalPrice and packageTotalPrice are numbers
                 var totalPrice = ReadDecimal(o, "totalPrice") ?? ReadDecimal(o, "packageTotalPrice") ?? 0m;
 
                 var email = ReadString(o, "customerEmail");
                 var firstName = ReadString(o, "customerFirstName");
                 var lastName = ReadString(o, "customerLastName");
 
+                // Trendyol shipmentAddress.phone often null, keep from shipmentAddress if exists
                 string? phone = null;
-                if (o.TryGetProperty("shipmentAddress", out var shipAddr) && shipAddr.ValueKind == JsonValueKind.Object)
-                    phone = ReadString(shipAddr, "phone");
+                TrendyolAddressDto? shipAddr = null;
+                if (o.TryGetProperty("shipmentAddress", out var ship) && ship.ValueKind == JsonValueKind.Object)
+                {
+                    phone = ReadString(ship, "phone");
+                    shipAddr = ParseAddress(ship);
+                }
+
+                TrendyolAddressDto? billAddr = null;
+                if (o.TryGetProperty("invoiceAddress", out var inv) && inv.ValueKind == JsonValueKind.Object)
+                    billAddr = ParseAddress(inv);
 
                 var lines = new List<TrendyolOrderLineUpsert>();
-
                 if (o.TryGetProperty("lines", out var li) && li.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var l in li.EnumerateArray())
@@ -137,9 +141,7 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                         var productName = ReadString(l, "productName") ?? "unknown";
                         var qty = (int)(ReadInt64(l, "quantity") ?? 1);
 
-                        // lineUnitPrice is NUMBER in real payload
                         var unit = ReadDecimal(l, "lineUnitPrice") ?? ReadDecimal(l, "price") ?? 0m;
-
                         var lineCurrency = ReadString(l, "currencyCode") ?? currency;
 
                         lines.Add(new TrendyolOrderLineUpsert(sku, productName, qty, unit, lineCurrency));
@@ -157,7 +159,9 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                     CustomerFirstName: firstName,
                     CustomerLastName: lastName,
                     Lines: lines,
-                    PayloadJson: o.GetRawText());
+                    PayloadJson: o.GetRawText(),
+                    ShippingAddress: shipAddr,
+                    BillingAddress: billAddr);
 
                 await _store.UpsertOrderAsync(tenantId, model, ct);
 
@@ -172,7 +176,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 break;
         }
 
-        // advance cursor
         var nextCursor = maxSeenOrderDate > 0 ? (maxSeenOrderDate + 1) : (endMs + 1);
         await _cursors.UpsertAsync(tenantId, connId, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
@@ -180,6 +183,32 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
     }
 
     private sealed record TrendyolCreds(string ApiKey, string ApiSecret, string UserAgent);
+
+    private static TrendyolAddressDto ParseAddress(JsonElement a)
+    {
+        var address1 = ReadString(a, "address1");
+        var address2 = ReadString(a, "address2");
+        var city = ReadString(a, "city");
+        var cityCode = (int?)ReadInt64(a, "cityCode");
+        var district = ReadString(a, "district");
+        var districtId = (int?)ReadInt64(a, "districtId");
+        var countryCode = ReadString(a, "countryCode");
+        var postalCode = ReadString(a, "postalCode");
+        var phone = ReadString(a, "phone");
+        var fullName = ReadString(a, "fullName");
+
+        return new TrendyolAddressDto(
+            Address1: address1,
+            Address2: address2,
+            City: city,
+            CityCode: cityCode,
+            District: district,
+            DistrictId: districtId,
+            CountryCode: countryCode,
+            PostalCode: postalCode,
+            Phone: phone,
+            FullName: fullName);
+    }
 
     private static string? ReadString(JsonElement obj, string name)
         => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;

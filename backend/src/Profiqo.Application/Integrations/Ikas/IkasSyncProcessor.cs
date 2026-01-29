@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Ikas/IkasSyncProcessor.cs
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -7,9 +8,8 @@ using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Domain.Common.Ids;
+using Profiqo.Domain.Common.Types;
 using Profiqo.Domain.Integrations;
-
-using static System.Reflection.Metadata.BlobBuilder;
 
 namespace Profiqo.Application.Integrations.Ikas;
 
@@ -18,16 +18,14 @@ public interface IIkasSyncProcessor
     Task<int> SyncCustomersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
     Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
     Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
-
 }
 
 public sealed class IkasSyncProcessor : IIkasSyncProcessor
 {
     private const int InitialBackfillDays = 30;
 
-    // Cursor keys (ms since epoch)
     private const string CustomerCursorKey = "ikas.customers.cursor.updatedAtMs";
-    private const string OrderCursorKey = "ikas.orders.cursor.orderedAtMs";
+    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs"; // ✅ updatedAt üzerinden cursor
 
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
@@ -61,18 +59,15 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
         var token = _secrets.Unprotect(conn.AccessToken);
 
-        // Cursor is "last processed updatedAt" (ms)
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-InitialBackfillDays).ToUnixTimeMilliseconds();
 
         var cursorMs = await GetCursorMsOrNull(tenantId, connId, CustomerCursorKey, ct);
-        var stopBeforeMs = cursorMs ?? initialCutoffMs; // stop when item.updatedAt < stopBeforeMs
+        var stopBeforeMs = cursorMs ?? initialCutoffMs;
 
         var processed = 0;
         long maxSeenUpdatedAt = cursorMs ?? 0;
 
-        // Server-side updatedAt filter is NOT used (you confirmed it makes result empty).
-        // We rely on sorting (-updatedAt) and stop condition on client side.
         for (var page = 1; page <= maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
@@ -93,7 +88,6 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
                 var updatedAtMs = ReadInt64(c, "updatedAt") ?? 0L;
 
-                // Because sort is -updatedAt, once we cross the threshold we can stop entire paging
                 if (updatedAtMs > 0 && updatedAtMs < stopBeforeMs)
                 {
                     stopAll = true;
@@ -127,14 +121,11 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
             await _jobs.MarkProgressAsync(jobId, processed, ct);
 
-            // Optional: break if API says no next page
             var hasNext = ReadBoolean(list, "hasNext");
             if (!hasNext || stopAll)
                 break;
         }
 
-        // Cursor advance: avoid reprocessing exact same timestamp
-        // If cursor was null (first sync), we set it to maxSeenUpdatedAt; if no updatedAt available, fallback to now.
         var nextCursor = maxSeenUpdatedAt > 0 ? (maxSeenUpdatedAt + 1) : (nowMs + 1);
         await _cursors.UpsertAsync(tenantId, connId, CustomerCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
@@ -154,16 +145,21 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-InitialBackfillDays).ToUnixTimeMilliseconds();
 
         var cursorMs = await GetCursorMsOrNull(tenantId, connId, OrderCursorKey, ct);
-        var orderedAtGteMs = cursorMs ?? initialCutoffMs; // server-side orderedAt filter (works per your curl)
+
+        // ✅ Server-side updatedAt filter bazen boş döndürme riskli.
+        // Bu yüzden server-side updatedAt filter'ı sadece cursor varsa kullanıyoruz.
+        var updatedAtGteMs = cursorMs;
+
+        var stopBeforeMs = cursorMs ?? initialCutoffMs;
 
         var processed = 0;
-        long maxSeenOrderedAt = cursorMs ?? 0;
+        long maxSeenUpdatedAt = cursorMs ?? 0;
 
         for (var page = 1; page <= maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
-            using var doc = await _ikas.ListOrdersAsync(token, page, pageSize, orderedAtGteMs, ct);
+            using var doc = await _ikas.ListOrdersAsync(token, page, pageSize, updatedAtGteMs, ct);
 
             var list = doc.RootElement.GetProperty("data").GetProperty("listOrder");
             var data = list.GetProperty("data");
@@ -177,29 +173,28 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
             {
                 ct.ThrowIfCancellationRequested();
 
-                var orderedAtMs = ReadInt64(o, "orderedAt") ?? 0L;
-                if (orderedAtMs > 0 && orderedAtMs < orderedAtGteMs)
+                var updatedAtMs = ReadInt64(o, "updatedAt") ?? 0L;
+
+                // sort -orderedAt olduğundan kesin değil ama yine de cutoff altına düştüyse stop edebiliriz
+                if (updatedAtMs > 0 && updatedAtMs < stopBeforeMs)
                 {
-                    // sorted -orderedAt, safe to stop
                     stopAll = true;
                     break;
                 }
 
-                if (orderedAtMs > maxSeenOrderedAt)
-                    maxSeenOrderedAt = orderedAtMs;
+                if (updatedAtMs > maxSeenUpdatedAt)
+                    maxSeenUpdatedAt = updatedAtMs;
+
+                var orderedAtMs = ReadInt64(o, "orderedAt") ?? 0L;
+                var placedAtUtc = orderedAtMs > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(orderedAtMs) : DateTimeOffset.UtcNow;
 
                 var providerOrderId = ReadString(o, "orderNumber");
                 if (string.IsNullOrWhiteSpace(providerOrderId))
                     providerOrderId = ReadString(o, "id") ?? Guid.NewGuid().ToString("N");
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
-                var totalFinal = ReadDecimal(o, "totalFinalPrice") ?? 0m;
+                var totalFinal = ReadDecimal(o, "totalFinalPrice") ?? ReadDecimal(o, "totalPrice") ?? 0m;
 
-                var placedAtUtc = orderedAtMs > 0
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(orderedAtMs)
-                    : DateTimeOffset.UtcNow;
-
-                // Customer identities from order.customer
                 string? emailNorm = null, emailHash = null, phoneNorm = null, phoneHash = null;
 
                 if (o.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
@@ -214,7 +209,6 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     phoneHash = string.IsNullOrWhiteSpace(phoneNorm) ? null : Sha256Hex(phoneNorm);
                 }
 
-                // ✅ Order line mapping from orderLineItems
                 var lines = new List<IkasOrderLineUpsert>();
 
                 if (o.TryGetProperty("orderLineItems", out var oli) && oli.ValueKind == JsonValueKind.Array)
@@ -252,17 +246,24 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     }
                 }
 
+                // ✅ NEW: shippingAddress raw json
+                string? shippingJson = null;
+                if (o.TryGetProperty("shippingAddress", out var ship) && ship.ValueKind == JsonValueKind.Object)
+                    shippingJson = ship.GetRawText();
+
                 var model = new IkasOrderUpsert(
                     ProviderOrderId: providerOrderId!,
                     PlacedAtUtc: placedAtUtc,
-                    UpdatedAtMs: ReadInt64(o, "updatedAt") ?? 0L,
+                    UpdatedAtMs: updatedAtMs,
                     CurrencyCode: currency,
                     TotalFinalPrice: totalFinal,
                     CustomerEmailNormalized: emailNorm,
                     CustomerEmailHashSha256: emailHash,
                     CustomerPhoneNormalized: phoneNorm,
                     CustomerPhoneHashSha256: phoneHash,
-                    Lines: lines);
+                    Lines: lines,
+                    ShippingAddressJson: shippingJson,
+                    BillingAddressJson: null);
 
                 await _store.UpsertOrderAsync(tenantId, model, ct);
                 processed++;
@@ -275,132 +276,122 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 break;
         }
 
-        // Cursor advance (orderedAt-based)
-        var nextCursor = maxSeenOrderedAt > 0 ? (maxSeenOrderedAt + 1) : (nowMs + 1);
+        var nextCursor = maxSeenUpdatedAt > 0 ? (maxSeenUpdatedAt + 1) : (nowMs + 1);
         await _cursors.UpsertAsync(tenantId, connId, OrderCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;
     }
 
-  
-
-public async Task<int> SyncAbandonedCheckoutsAsync(
-    Guid jobId,
-    TenantId tenantId,
-    Guid connectionId,
-    int pageSize,
-    int maxPages,
-    CancellationToken ct)
-{
-    var connId = new ProviderConnectionId(connectionId);
-    var conn = await _connections.GetByIdAsync(connId, ct);
-    if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
-        throw new InvalidOperationException("Ikas connection not found for tenant.");
-
-    var token = _secrets.Unprotect(conn.AccessToken);
-
-    const string cursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
-
-    var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
-
-    var cursorMs = await GetCursorMsOrNull(tenantId, connId, cursorKey, ct);
-    var gteMs = cursorMs ?? initialCutoffMs;
-
-    var processed = 0;
-    long maxSeen = cursorMs ?? 0;
-
-    for (var page = 1; page <= maxPages; page++)
+    public async Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
+        var connId = new ProviderConnectionId(connectionId);
+        var conn = await _connections.GetByIdAsync(connId, ct);
+        if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
+            throw new InvalidOperationException("Ikas connection not found for tenant.");
 
-        using var doc = await _ikas.ListAbandonedCheckoutsAsync(token, page, pageSize, gteMs, ct);
+        var token = _secrets.Unprotect(conn.AccessToken);
 
-        var list = doc.RootElement.GetProperty("data").GetProperty("listAbandonedCheckouts");
-        var data = list.GetProperty("data");
+        const string cursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
 
-        if (data.ValueKind != JsonValueKind.Array || data.GetArrayLength() == 0)
-            break;
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
 
-        var stopAll = false;
+        var cursorMs = await GetCursorMsOrNull(tenantId, connId, cursorKey, ct);
+        var gteMs = cursorMs ?? initialCutoffMs;
 
-        foreach (var a in data.EnumerateArray())
+        var processed = 0;
+        long maxSeen = cursorMs ?? 0;
+
+        for (var page = 1; page <= maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
-            var externalId = ReadString(a, "id") ?? Guid.NewGuid().ToString("N");
-            var status = ReadString(a, "status");
+            using var doc = await _ikas.ListAbandonedCheckoutsAsync(token, page, pageSize, gteMs, ct);
 
-            long lastActivity = 0;
-            string? currency = null;
-            decimal? totalPrice = null;
+            var list = doc.RootElement.GetProperty("data").GetProperty("listAbandonedCheckouts");
+            var data = list.GetProperty("data");
 
-            if (a.TryGetProperty("cart", out var cart) && cart.ValueKind == JsonValueKind.Object)
-            {
-                lastActivity = ReadInt64(cart, "lastActivityDate") ?? 0L;
-                currency = ReadString(cart, "currencyCode");
-                totalPrice = ReadDecimal(cart, "totalPrice"); // ✅ FIX
-            }
-
-            if (lastActivity <= 0)
-            {
-                var updatedAt = ReadInt64(a, "updatedAt") ?? 0L;
-                lastActivity = updatedAt > 0 ? updatedAt : nowMs;
-            }
-
-            if (lastActivity > 0 && lastActivity < gteMs)
-            {
-                stopAll = true;
+            if (data.ValueKind != JsonValueKind.Array || data.GetArrayLength() == 0)
                 break;
-            }
 
-            if (lastActivity > maxSeen) maxSeen = lastActivity;
+            var stopAll = false;
 
-            string? email = null;
-            string? phone = null;
-
-            if (a.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
+            foreach (var a in data.EnumerateArray())
             {
-                email = NormalizeEmail(ReadString(cust, "email"));
-                phone = NormalizePhone(ReadString(cust, "phone"));
+                ct.ThrowIfCancellationRequested();
+
+                var externalId = ReadString(a, "id") ?? Guid.NewGuid().ToString("N");
+                var status = ReadString(a, "status");
+
+                long lastActivity = 0;
+                string? currency = null;
+                decimal? totalPrice = null;
+
+                if (a.TryGetProperty("cart", out var cart) && cart.ValueKind == JsonValueKind.Object)
+                {
+                    lastActivity = ReadInt64(cart, "lastActivityDate") ?? 0L;
+                    currency = ReadString(cart, "currencyCode");
+                    totalPrice = ReadDecimal(cart, "totalPrice");
+                }
+
+                if (lastActivity <= 0)
+                {
+                    var updatedAt = ReadInt64(a, "updatedAt") ?? 0L;
+                    lastActivity = updatedAt > 0 ? updatedAt : nowMs;
+                }
+
+                if (lastActivity > 0 && lastActivity < gteMs)
+                {
+                    stopAll = true;
+                    break;
+                }
+
+                if (lastActivity > maxSeen) maxSeen = lastActivity;
+
+                string? email = null;
+                string? phone = null;
+
+                if (a.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
+                {
+                    email = NormalizeEmail(ReadString(cust, "email"));
+                    phone = NormalizePhone(ReadString(cust, "phone"));
+                }
+
+                var payloadJson = a.GetRawText();
+
+                await _store.UpsertAbandonedCheckoutAsync(
+                    tenantId,
+                    connId,
+                    new IkasAbandonedCheckoutUpsert(
+                        ExternalId: externalId,
+                        LastActivityDateMs: lastActivity,
+                        CurrencyCode: currency,
+                        TotalFinalPrice: totalPrice,
+                        Status: status,
+                        CustomerEmail: string.IsNullOrWhiteSpace(email) ? null : email,
+                        CustomerPhone: string.IsNullOrWhiteSpace(phone) ? null : phone,
+                        PayloadJson: payloadJson),
+                    ct);
+
+                processed++;
+
+                if (processed % 25 == 0)
+                    await _jobs.MarkProgressAsync(jobId, processed, ct);
             }
 
-            var payloadJson = a.GetRawText();
+            await _jobs.MarkProgressAsync(jobId, processed, ct);
 
-            await _store.UpsertAbandonedCheckoutAsync(
-                tenantId,
-                connId,
-                new IkasAbandonedCheckoutUpsert(
-                    ExternalId: externalId,
-                    LastActivityDateMs: lastActivity,
-                    CurrencyCode: currency,
-                    TotalFinalPrice: totalPrice, // we store it in TotalFinalPrice field for now (name is generic)
-                    Status: status,
-                    CustomerEmail: string.IsNullOrWhiteSpace(email) ? null : email,
-                    CustomerPhone: string.IsNullOrWhiteSpace(phone) ? null : phone,
-                    PayloadJson: payloadJson),
-                ct);
-
-            processed++;
-
-            if (processed % 25 == 0)
-                await _jobs.MarkProgressAsync(jobId, processed, ct);
+            var hasNext = ReadBoolean(list, "hasNext");
+            if (!hasNext || stopAll) break;
         }
 
-        await _jobs.MarkProgressAsync(jobId, processed, ct);
+        var nextCursor = maxSeen > 0 ? (maxSeen + 1) : (nowMs + 1);
+        await _cursors.UpsertAsync(tenantId, connId, cursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
-        var hasNext = ReadBoolean(list, "hasNext");
-        if (!hasNext || stopAll) break;
+        return processed;
     }
 
-    var nextCursor = maxSeen > 0 ? (maxSeen + 1) : (nowMs + 1);
-    await _cursors.UpsertAsync(tenantId, connId, cursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
-
-    return processed;
-}
-
-
-private async Task<long?> GetCursorMsOrNull(TenantId tenantId, ProviderConnectionId connId, string key, CancellationToken ct)
+    private async Task<long?> GetCursorMsOrNull(TenantId tenantId, ProviderConnectionId connId, string key, CancellationToken ct)
     {
         var s = await _cursors.GetAsync(tenantId, connId, key, ct);
         if (long.TryParse(s, out var ms) && ms > 0)

@@ -1,4 +1,5 @@
-﻿using Profiqo.Domain.Common.Ids;
+﻿// Path: backend/src/Profiqo.Application/Abstractions/Integrations/Ikas/IIkasSyncStore.cs
+using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Application.Abstractions.Integrations.Ikas;
 
@@ -31,7 +32,10 @@ public sealed record IkasOrderUpsert(
     string? CustomerEmailHashSha256,
     string? CustomerPhoneNormalized,
     string? CustomerPhoneHashSha256,
-    IReadOnlyList<IkasOrderLineUpsert> Lines);
+    IReadOnlyList<IkasOrderLineUpsert> Lines,
+    string? ShippingAddressJson,
+    string? BillingAddressJson);
+
 public sealed record IkasAbandonedCheckoutUpsert(
     string ExternalId,
     long LastActivityDateMs,
@@ -41,6 +45,7 @@ public sealed record IkasAbandonedCheckoutUpsert(
     string? CustomerEmail,
     string? CustomerPhone,
     string PayloadJson);
+
 public interface IIkasSyncStore
 {
     Task<CustomerId> UpsertCustomerAsync(TenantId tenantId, IkasCustomerUpsert model, CancellationToken ct);
@@ -48,5 +53,4 @@ public interface IIkasSyncStore
     Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct);
 
     Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct);
-
 }

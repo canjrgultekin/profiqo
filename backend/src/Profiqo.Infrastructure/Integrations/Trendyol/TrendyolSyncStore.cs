@@ -1,6 +1,7 @@
 ﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Trendyol/TrendyolSyncStore.cs
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -39,8 +40,7 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
         if (!string.IsNullOrWhiteSpace(model.CustomerFirstName) || !string.IsNullOrWhiteSpace(model.CustomerLastName))
             customer.SetName(model.CustomerFirstName, model.CustomerLastName, now);
 
-        // ProviderOrderId = shipmentPackageId string (unique)
-        var providerOrderId = (model.ShipmentPackageId ?? "").Trim();
+        var providerOrderId = (model.ShipmentPackageId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(providerOrderId))
             providerOrderId = Guid.NewGuid().ToString("N");
 
@@ -58,7 +58,6 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
         var totalAmount = new Money(model.TotalPrice, new CurrencyCode(currency));
 
         var lines = (model.Lines ?? Array.Empty<TrendyolOrderLineUpsert>())
-            .Where(l => l is not null)
             .Select(l =>
             {
                 var lc = NormalizeCurrency(l.CurrencyCode);
@@ -73,13 +72,8 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
             })
             .ToList();
 
-        // If Trendyol returns empty lines for some packages, still persist order with no lines is not desired.
-        // We'll enforce at least 1 line to keep schema consistent.
         if (lines.Count == 0)
-        {
-            // create a minimal synthetic line (doesn't break domain invariants)
             lines.Add(new OrderLine("NA", "unknown", 1, Money.Zero(new CurrencyCode(currency))));
-        }
 
         var created = Order.Create(
             tenantId: tenantId,
@@ -92,6 +86,39 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
             nowUtc: now);
 
         await _db.Orders.AddAsync(created, ct);
+
+        // ✅ NEW: set shadow address jsons
+        var shipJson = JsonSerializer.Serialize(new
+        {
+            addressLine1 = model.ShippingAddress?.Address1,
+            addressLine2 = model.ShippingAddress?.Address2,
+            city = model.ShippingAddress?.City,
+            cityCode = model.ShippingAddress?.CityCode,
+            district = model.ShippingAddress?.District,
+            districtCode = model.ShippingAddress?.DistrictId,
+            country = model.ShippingAddress?.CountryCode,
+            postalCode = model.ShippingAddress?.PostalCode,
+            phone = model.ShippingAddress?.Phone,
+            fullName = model.ShippingAddress?.FullName
+        });
+
+        var billJson = JsonSerializer.Serialize(new
+        {
+            addressLine1 = model.BillingAddress?.Address1,
+            addressLine2 = model.BillingAddress?.Address2,
+            city = model.BillingAddress?.City,
+            cityCode = model.BillingAddress?.CityCode,
+            district = model.BillingAddress?.District,
+            districtCode = model.BillingAddress?.DistrictId,
+            country = model.BillingAddress?.CountryCode,
+            postalCode = model.BillingAddress?.PostalCode,
+            phone = model.BillingAddress?.Phone,
+            fullName = model.BillingAddress?.FullName
+        });
+
+        _db.Entry(created).Property("ShippingAddressJson").CurrentValue = shipJson;
+        _db.Entry(created).Property("BillingAddressJson").CurrentValue = billJson;
+
         await _db.SaveChangesAsync(ct);
     }
 
@@ -138,9 +165,12 @@ SELECT c.*
 FROM public.customers c
 JOIN public.customer_identities i ON i.customer_id = c.id
 WHERE c.tenant_id = {0} AND i.tenant_id = {0} AND i.type = {1} AND i.value_hash = {2}
-LIMIT 1
-";
-        return await _db.Customers.FromSqlRaw(sql, tenantGuid, identityType, valueHash).FirstOrDefaultAsync(ct);
+LIMIT 1";
+
+        return await _db.Customers
+            .FromSqlRaw(sql, tenantGuid, identityType, valueHash)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct);
     }
 
     private static string NormalizeEmail(string? email) => (email ?? "").Trim().ToLowerInvariant();
