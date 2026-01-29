@@ -27,6 +27,7 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
     {
         var now = DateTimeOffset.UtcNow;
 
+        // Resolve/Create Customer
         var emailNorm = NormalizeEmail(model.CustomerEmail);
         var phoneNorm = NormalizePhone(model.CustomerPhone);
 
@@ -38,33 +39,47 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
         if (!string.IsNullOrWhiteSpace(model.CustomerFirstName) || !string.IsNullOrWhiteSpace(model.CustomerLastName))
             customer.SetName(model.CustomerFirstName, model.CustomerLastName, now);
 
-        // ProviderOrderId = shipmentPackageId (unique)
-        var providerOrderId = model.ShipmentPackageId;
+        // ProviderOrderId = shipmentPackageId string (unique)
+        var providerOrderId = (model.ShipmentPackageId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(providerOrderId))
+            providerOrderId = Guid.NewGuid().ToString("N");
 
         var channel = SalesChannel.Trendyol;
-        var existing = await _db.Orders.FirstOrDefaultAsync(x =>
+
+        var exists = await _db.Orders.AsNoTracking().AnyAsync(x =>
             x.TenantId == tenantId &&
             x.Channel == channel &&
             x.ProviderOrderId == providerOrderId, ct);
 
-        if (existing is not null)
+        if (exists)
             return;
 
         var currency = NormalizeCurrency(model.CurrencyCode);
         var totalAmount = new Money(model.TotalPrice, new CurrencyCode(currency));
 
-        var lines = model.Lines.Select(l =>
+        var lines = (model.Lines ?? Array.Empty<TrendyolOrderLineUpsert>())
+            .Where(l => l is not null)
+            .Select(l =>
+            {
+                var lc = NormalizeCurrency(l.CurrencyCode);
+                var qty = l.Quantity <= 0 ? 1 : l.Quantity;
+
+                var unitMoney = new Money(l.UnitPrice, new CurrencyCode(lc));
+
+                var sku = string.IsNullOrWhiteSpace(l.Sku) ? "NA" : l.Sku.Trim();
+                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
+
+                return new OrderLine(sku, name, qty, unitMoney);
+            })
+            .ToList();
+
+        // If Trendyol returns empty lines for some packages, still persist order with no lines is not desired.
+        // We'll enforce at least 1 line to keep schema consistent.
+        if (lines.Count == 0)
         {
-            var lc = NormalizeCurrency(l.CurrencyCode);
-            var qty = l.Quantity <= 0 ? 1 : l.Quantity;
-
-            var unitMoney = new Money(l.UnitPrice, new CurrencyCode(lc));
-
-            var sku = string.IsNullOrWhiteSpace(l.Sku) ? "NA" : l.Sku.Trim();
-            var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
-
-            return new OrderLine(sku, name, qty, unitMoney);
-        }).ToList();
+            // create a minimal synthetic line (doesn't break domain invariants)
+            lines.Add(new OrderLine("NA", "unknown", 1, Money.Zero(new CurrencyCode(currency))));
+        }
 
         var created = Order.Create(
             tenantId: tenantId,
@@ -123,7 +138,7 @@ SELECT c.*
 FROM public.customers c
 JOIN public.customer_identities i ON i.customer_id = c.id
 WHERE c.tenant_id = {0} AND i.tenant_id = {0} AND i.type = {1} AND i.value_hash = {2}
-LIMIT 1;
+LIMIT 1
 ";
         return await _db.Customers.FromSqlRaw(sql, tenantGuid, identityType, valueHash).FirstOrDefaultAsync(ct);
     }

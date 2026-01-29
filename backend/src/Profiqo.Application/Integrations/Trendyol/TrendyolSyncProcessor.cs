@@ -54,6 +54,7 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         var credsJson = _secrets.Unprotect(conn.AccessToken);
         var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Invalid credentials");
 
+        // Cursor: last seen orderDateMs
         var cursorRaw = await _cursors.GetAsync(tenantId, connId, CursorKey, ct);
         long? cursorMs = long.TryParse(cursorRaw, out var c) && c > 0 ? c : null;
 
@@ -62,25 +63,26 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         var startMs = cursorMs ?? startMsDefault;
 
         var safeSize = pageSize <= 0 ? _opts.DefaultPageSize : Math.Min(pageSize, _opts.PageSizeMax);
+        var safeMaxPages = maxPages <= 0 ? _opts.DefaultMaxPages : maxPages;
 
         var processed = 0;
         long maxSeenOrderDate = startMs;
 
-        for (var page = 0; page < maxPages; page++)
+        for (var page = 0; page < safeMaxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
             using var doc = await _client.GetOrdersAsync(
-                creds.ApiKey,
-                creds.ApiSecret,
-                sellerId,
-                creds.UserAgent,
-                startMs,
-                endMs,
-                page,
-                safeSize,
-                _opts.OrderByField,
-                ct);
+                apiKey: creds.ApiKey,
+                apiSecret: creds.ApiSecret,
+                sellerId: sellerId,
+                userAgent: creds.UserAgent,
+                startDateMs: startMs,
+                endDateMs: endMs,
+                page: page,
+                size: safeSize,
+                orderByField: _opts.OrderByField,
+                ct: ct);
 
             var root = doc.RootElement;
 
@@ -91,8 +93,15 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
             {
                 ct.ThrowIfCancellationRequested();
 
-                var shipmentPackageId = ReadString(o, "shipmentPackageId") ?? ReadString(o, "id") ?? Guid.NewGuid().ToString("N");
-                var orderNumber = ReadString(o, "orderNumber") ?? shipmentPackageId;
+                // shipmentPackageId is NUMBER in real payload -> read as string safely
+                var shipmentPackageId =
+                    ReadStringOrNumber(o, "shipmentPackageId") ??
+                    ReadStringOrNumber(o, "id") ??
+                    Guid.NewGuid().ToString("N");
+
+                var orderNumber =
+                    ReadStringOrNumber(o, "orderNumber") ??
+                    shipmentPackageId;
 
                 var orderDateMs = ReadInt64(o, "orderDate") ?? startMs;
                 if (orderDateMs > maxSeenOrderDate) maxSeenOrderDate = orderDateMs;
@@ -101,17 +110,16 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
 
-                // Trendyol response: totalPrice is net price after discounts (your sample)
+                // totalPrice and packageTotalPrice are numbers
                 var totalPrice = ReadDecimal(o, "totalPrice") ?? ReadDecimal(o, "packageTotalPrice") ?? 0m;
 
                 var email = ReadString(o, "customerEmail");
                 var firstName = ReadString(o, "customerFirstName");
                 var lastName = ReadString(o, "customerLastName");
 
-                // phone often null in shipmentAddress.phone; still try it
                 string? phone = null;
-                if (o.TryGetProperty("shipmentAddress", out var sa) && sa.ValueKind == JsonValueKind.Object)
-                    phone = ReadString(sa, "phone");
+                if (o.TryGetProperty("shipmentAddress", out var shipAddr) && shipAddr.ValueKind == JsonValueKind.Object)
+                    phone = ReadString(shipAddr, "phone");
 
                 var lines = new List<TrendyolOrderLineUpsert>();
 
@@ -129,10 +137,8 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                         var productName = ReadString(l, "productName") ?? "unknown";
                         var qty = (int)(ReadInt64(l, "quantity") ?? 1);
 
-                        // sample: lineUnitPrice exists and is net per item
-                        var unit = ReadDecimal(l, "lineUnitPrice")
-                                   ?? ReadDecimal(l, "price")
-                                   ?? 0m;
+                        // lineUnitPrice is NUMBER in real payload
+                        var unit = ReadDecimal(l, "lineUnitPrice") ?? ReadDecimal(l, "price") ?? 0m;
 
                         var lineCurrency = ReadString(l, "currencyCode") ?? currency;
 
@@ -156,17 +162,17 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 await _store.UpsertOrderAsync(tenantId, model, ct);
 
                 processed++;
-                if (processed % 50 == 0)
+                if (processed % 25 == 0)
                     await _jobs.MarkProgressAsync(jobId, processed, ct);
             }
 
             await _jobs.MarkProgressAsync(jobId, processed, ct);
 
-            // If we got less than requested size, no more pages
             if (content.GetArrayLength() < safeSize)
                 break;
         }
 
+        // advance cursor
         var nextCursor = maxSeenOrderDate > 0 ? (maxSeenOrderDate + 1) : (endMs + 1);
         await _cursors.UpsertAsync(tenantId, connId, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
@@ -178,6 +184,19 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
     private static string? ReadString(JsonElement obj, string name)
         => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
 
+    private static string? ReadStringOrNumber(JsonElement obj, string name)
+    {
+        if (obj.ValueKind != JsonValueKind.Object) return null;
+        if (!obj.TryGetProperty(name, out var p)) return null;
+
+        return p.ValueKind switch
+        {
+            JsonValueKind.String => p.GetString(),
+            JsonValueKind.Number => p.TryGetInt64(out var l) ? l.ToString() : p.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => null
+        };
+    }
+
     private static long? ReadInt64(JsonElement obj, string name)
         => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt64() : null;
 
@@ -185,8 +204,9 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
     {
         if (obj.ValueKind != JsonValueKind.Object) return null;
         if (!obj.TryGetProperty(name, out var p)) return null;
+
         if (p.ValueKind == JsonValueKind.Number && p.TryGetDecimal(out var d)) return d;
-        if (p.ValueKind == JsonValueKind.String && decimal.TryParse(p.GetString(), out var x)) return x;
+        if (p.ValueKind == JsonValueKind.String && decimal.TryParse(p.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var x)) return x;
         return null;
     }
 }
