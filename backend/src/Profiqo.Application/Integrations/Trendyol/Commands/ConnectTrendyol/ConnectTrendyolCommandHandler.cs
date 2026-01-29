@@ -39,7 +39,8 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
     public async Task<Guid> Handle(ConnectTrendyolCommand request, CancellationToken ct)
     {
         var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null) throw new UnauthorizedException("Tenant context missing.");
+        if (tenantId is null)
+            throw new UnauthorizedException("Tenant context missing.");
 
         var sellerId = (request.SellerId ?? "").Trim();
         var apiKey = (request.ApiKey ?? "").Trim();
@@ -47,16 +48,32 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? "Trendyol" : request.DisplayName.Trim();
         var userAgent = string.IsNullOrWhiteSpace(request.UserAgent) ? $"Profiqo/{sellerId}" : request.UserAgent!.Trim();
 
-        if (string.IsNullOrWhiteSpace(sellerId)) throw new ArgumentException("SellerId required.", nameof(request.SellerId));
-        if (string.IsNullOrWhiteSpace(apiKey)) throw new ArgumentException("ApiKey required.", nameof(request.ApiKey));
-        if (string.IsNullOrWhiteSpace(apiSecret)) throw new ArgumentException("ApiSecret required.", nameof(request.ApiSecret));
+        if (string.IsNullOrWhiteSpace(sellerId))
+            throw new ArgumentException("SellerId required.", nameof(request.SellerId));
 
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new ArgumentException("ApiKey required.", nameof(request.ApiKey));
+
+        if (string.IsNullOrWhiteSpace(apiSecret))
+            throw new ArgumentException("ApiSecret required.", nameof(request.ApiSecret));
+
+        // Validate connectivity: last 1 day, 1 item
         var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var startMs = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
 
-        // validate 200
-        _ = await _client.GetOrdersAsync(apiKey, apiSecret, sellerId, userAgent, startMs, endMs, 0, 1, _opts.OrderByField, ct);
+        _ = await _client.GetOrdersAsync(
+            apiKey: apiKey,
+            apiSecret: apiSecret,
+            sellerId: sellerId,
+            userAgent: userAgent,
+            startDateMs: startMs,
+            endDateMs: endMs,
+            page: 0,
+            size: 1,
+            orderByField: _opts.OrderByField,
+            ct: ct);
 
+        // Store encrypted JSON { apiKey, apiSecret, userAgent }
         var credsJson = JsonSerializer.Serialize(new TrendyolCreds(apiKey, apiSecret, userAgent));
         var enc = _secrets.Protect(credsJson);
 
@@ -75,11 +92,14 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
                 nowUtc: DateTimeOffset.UtcNow);
 
             await _connections.AddAsync(created, ct);
+
+            // ✅ UnitOfWorkBehavior şimdi bunu command olarak görecek ve SaveChanges çalışacak
             return created.Id.Value;
         }
 
         existing.UpdateProfile(displayName, sellerId, DateTimeOffset.UtcNow);
         existing.RotateTokens(enc, null, null, DateTimeOffset.UtcNow);
+
         return existing.Id.Value;
     }
 

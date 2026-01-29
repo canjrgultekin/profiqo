@@ -43,24 +43,19 @@ internal sealed class TestTrendyolCommandHandler : IRequestHandler<TestTrendyolC
         if (tenantId is null)
             throw new UnauthorizedException("Tenant context missing.");
 
-        // 1) Try by id first
+        // First try by id
         var conn = await _connections.GetByIdAsync(new ProviderConnectionId(request.ConnectionId), ct);
 
-        // 2) Fallback: if UI sent wrong/stale connectionId, pick tenant's Trendyol connection
+        // Fallback: if UI sent stale id, pick tenant provider
         if (conn is null)
             conn = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Trendyol, ct);
 
-        if (conn is null)
+        if (conn is null || conn.TenantId != tenantId.Value || conn.ProviderType != ProviderType.Trendyol)
             throw new NotFoundException($"Trendyol connection not found for tenant. connectionId={request.ConnectionId}");
 
-        if (conn.TenantId != tenantId.Value || conn.ProviderType != ProviderType.Trendyol)
-            throw new NotFoundException($"Trendyol connection not found for tenant. connectionId={request.ConnectionId}");
-
-        var sellerId = conn.ExternalAccountId ?? throw new InvalidOperationException("SellerId missing on connection.");
-
+        var sellerId = conn.ExternalAccountId ?? throw new InvalidOperationException("SellerId missing.");
         var credsJson = _secrets.Unprotect(conn.AccessToken);
-        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson)
-                    ?? throw new InvalidOperationException("Trendyol credentials invalid (json).");
+        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Trendyol credentials invalid.");
 
         var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var startMs = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();

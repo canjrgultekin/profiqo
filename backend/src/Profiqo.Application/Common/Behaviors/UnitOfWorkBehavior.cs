@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿// Path: backend/src/Profiqo.Application/Common/Behaviors/UnitOfWorkBehavior.cs
+using MediatR;
 
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Common.Messaging;
@@ -31,7 +32,12 @@ internal sealed class UnitOfWorkBehavior<TRequest, TResponse> : IPipelineBehavio
     private static bool IsCommand(object request)
     {
         var type = request.GetType();
-        return type.GetInterfaces().Any(i =>
-            i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>));
+
+        // Generic ICommand<T>
+        if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICommand<>)))
+            return true;
+
+        // Optional non-generic marker (if exists in your codebase)
+        return type.GetInterfaces().Any(i => i == typeof(ICommand<>));
     }
 }

@@ -1,5 +1,5 @@
 ﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/Commands/ConnectTrendyol/ConnectTrendyolCommand.cs
-using MediatR;
+using Profiqo.Application.Common.Messaging;
 
 namespace Profiqo.Application.Integrations.Trendyol.Commands.ConnectTrendyol;
 
@@ -9,4 +9,4 @@ public sealed record ConnectTrendyolCommand(
     string ApiKey,
     string ApiSecret,
     string? UserAgent
-) : IRequest<Guid>;
+) : ICommand<Guid>;

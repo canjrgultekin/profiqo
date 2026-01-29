@@ -34,11 +34,12 @@ internal sealed class StartTrendyolSyncCommandHandler : IRequestHandler<StartTre
     public async Task<StartTrendyolSyncResult> Handle(StartTrendyolSyncCommand request, CancellationToken ct)
     {
         var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null) throw new UnauthorizedException("Tenant context missing.");
+        if (tenantId is null)
+            throw new UnauthorizedException("Tenant context missing.");
 
         var conn = await _connections.GetByIdAsync(new ProviderConnectionId(request.ConnectionId), ct);
         if (conn is null || conn.TenantId != tenantId.Value || conn.ProviderType != ProviderType.Trendyol)
-            throw new NotFoundException("Trendyol connection not found.");
+            throw new NotFoundException($"Trendyol connection not found for tenant. connectionId={request.ConnectionId}");
 
         var pageSize = request.PageSize is null or < 1 ? _opts.DefaultPageSize : Math.Min(request.PageSize.Value, _opts.PageSizeMax);
         var maxPages = request.MaxPages is null or < 1 or > 500 ? _opts.DefaultMaxPages : request.MaxPages.Value;
@@ -53,6 +54,7 @@ internal sealed class StartTrendyolSyncCommandHandler : IRequestHandler<StartTre
             PageSize: pageSize,
             MaxPages: maxPages), ct);
 
+        // ✅ UnitOfWorkBehavior şimdi bunu command olarak görecek ve SaveChanges çalışacak (job insert persist)
         return new StartTrendyolSyncResult(batchId, new[] { new StartTrendyolSyncJob(jobId, nameof(IntegrationJobKind.TrendyolSyncOrders)) });
     }
 }
