@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/Commands/TestTrendyol/TestTrendyolCommand.cs
+using MediatR;
 
 namespace Profiqo.Application.Integrations.Trendyol.Commands.TestTrendyol;
 

@@ -14,8 +14,11 @@ public enum IntegrationJobKind : short
     IkasSyncCustomers = 10,
     IkasSyncOrders = 11,
     IkasSyncAbandonedCheckouts = 12,
-    TrendyolSyncOrders = 20
 
+    TrendyolSyncOrders = 20,
+
+    ShopifySyncCustomers = 30,
+    ShopifySyncOrders = 31
 }
 
 

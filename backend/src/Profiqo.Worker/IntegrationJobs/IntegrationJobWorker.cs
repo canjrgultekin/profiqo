@@ -36,7 +36,7 @@ internal sealed class IntegrationJobWorker : BackgroundService
                 var jobs = scope.ServiceProvider.GetRequiredService<IIntegrationJobRepository>();
 
                 var ikas = scope.ServiceProvider.GetRequiredService<IIkasSyncProcessor>();
-                var trendyol = scope.ServiceProvider.GetRequiredService<ITrendyolSyncProcessor>();
+                var trendyol = scope.ServiceProvider.GetRequiredService<Profiqo.Application.Integrations.Trendyol.ITrendyolSyncProcessor>();
 
                 var job = await jobs.TryClaimNextAsync(_workerId, stoppingToken);
 
@@ -62,7 +62,9 @@ internal sealed class IntegrationJobWorker : BackgroundService
                     else if (job.Kind == IntegrationJobKind.IkasSyncAbandonedCheckouts)
                         processed = await ikas.SyncAbandonedCheckoutsAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     else if (job.Kind == IntegrationJobKind.TrendyolSyncOrders)
+                    {
                         processed = await trendyol.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
+                    }
                     else
                         throw new InvalidOperationException($"Unsupported job kind: {job.Kind}");
 

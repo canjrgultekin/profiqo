@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Headers;
+﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Trendyol/TrendyolClient.cs
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -22,27 +23,38 @@ internal sealed class TrendyolClient : ITrendyolClient
     public async Task<JsonDocument> GetOrdersAsync(
         string apiKey,
         string apiSecret,
-        string supplierId,
-        int page,
-        int size,
-        string status,
+        string sellerId,
+        string userAgent,
         long startDateMs,
         long endDateMs,
+        int page,
+        int size,
+        string orderByField,
         CancellationToken ct)
     {
+        // https://apigw.trendyol.com/integration/order/sellers/{sellerId}/orders
         var baseUrl = _opts.BaseUrl.TrimEnd('/');
+        var prefix = _opts.IntegrationPrefix.TrimEnd('/');
+
+        var safeSize = size <= 0 ? _opts.DefaultPageSize : Math.Min(size, _opts.PageSizeMax);
+        var safePage = page < 0 ? 0 : page;
+
         var url =
-            $"{baseUrl}/suppliers/{Uri.EscapeDataString(supplierId)}/orders" +
-            $"?status={Uri.EscapeDataString(status)}&page={page}&size={size}&startDate={startDateMs}&endDate={endDateMs}";
+            $"{baseUrl}{prefix}/order/sellers/{Uri.EscapeDataString(sellerId)}/orders" +
+            $"?startDate={startDateMs}&endDate={endDateMs}" +
+            $"&page={safePage}&size={safeSize}" +
+            $"&orderByField={Uri.EscapeDataString(string.IsNullOrWhiteSpace(orderByField) ? _opts.OrderByField : orderByField)}";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
 
+        // Basic base64(apiKey:apiSecret)
         var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{apiKey}:{apiSecret}"));
         req.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        // Many gateways are picky about UA
-        req.Headers.UserAgent.ParseAdd("Profiqo/1.0");
+        // User-Agent zorunlu kabul ediyoruz
+        req.Headers.UserAgent.ParseAdd(string.IsNullOrWhiteSpace(userAgent) ? $"Profiqo/{sellerId}" : userAgent);
 
         using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         var text = await res.Content.ReadAsStringAsync(ct);

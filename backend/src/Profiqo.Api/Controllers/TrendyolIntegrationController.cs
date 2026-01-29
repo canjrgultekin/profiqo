@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿// Path: backend/src/Profiqo.Api/Controllers/TrendyolIntegrationController.cs
+using MediatR;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -44,16 +45,16 @@ public sealed class TrendyolIntegrationController : ControllerBase
             connectionId = conn.Id.Value,
             status = conn.Status.ToString(),
             displayName = conn.DisplayName,
-            supplierId = conn.ExternalAccountId
+            sellerId = conn.ExternalAccountId
         });
     }
 
-    public sealed record ConnectRequest(string DisplayName, string SupplierId, string ApiKey, string ApiSecret);
+    public sealed record ConnectRequest(string DisplayName, string SellerId, string ApiKey, string ApiSecret, string? UserAgent);
 
     [HttpPost("connect")]
     public async Task<IActionResult> Connect([FromBody] ConnectRequest req, CancellationToken ct)
     {
-        var id = await _sender.Send(new ConnectTrendyolCommand(req.DisplayName, req.SupplierId, req.ApiKey, req.ApiSecret), ct);
+        var id = await _sender.Send(new ConnectTrendyolCommand(req.DisplayName, req.SellerId, req.ApiKey, req.ApiSecret, req.UserAgent), ct);
         return Ok(new { connectionId = id });
     }
 

@@ -1,6 +1,9 @@
-﻿using System.Text.Json;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/Commands/TestTrendyol/TestTrendyolCommandHandler.cs
+using System.Text.Json;
 
 using MediatR;
+
+using Microsoft.Extensions.Options;
 
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Trendyol;
@@ -18,38 +21,64 @@ internal sealed class TestTrendyolCommandHandler : IRequestHandler<TestTrendyolC
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
     private readonly ITrendyolClient _client;
+    private readonly TrendyolOptions _opts;
 
     public TestTrendyolCommandHandler(
         ITenantContext tenant,
         IProviderConnectionRepository connections,
         ISecretProtector secrets,
-        ITrendyolClient client)
+        ITrendyolClient client,
+        IOptions<TrendyolOptions> opts)
     {
         _tenant = tenant;
         _connections = connections;
         _secrets = secrets;
         _client = client;
+        _opts = opts.Value;
     }
 
     public async Task<bool> Handle(TestTrendyolCommand request, CancellationToken ct)
     {
         var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null) throw new UnauthorizedException("Tenant context missing.");
+        if (tenantId is null)
+            throw new UnauthorizedException("Tenant context missing.");
 
+        // 1) Try by id first
         var conn = await _connections.GetByIdAsync(new ProviderConnectionId(request.ConnectionId), ct);
-        if (conn is null || conn.TenantId != tenantId.Value || conn.ProviderType != ProviderType.Trendyol)
-            throw new NotFoundException("Trendyol connection not found.");
 
-        var supplierId = conn.ExternalAccountId ?? throw new InvalidOperationException("SupplierId missing on connection.");
+        // 2) Fallback: if UI sent wrong/stale connectionId, pick tenant's Trendyol connection
+        if (conn is null)
+            conn = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Trendyol, ct);
+
+        if (conn is null)
+            throw new NotFoundException($"Trendyol connection not found for tenant. connectionId={request.ConnectionId}");
+
+        if (conn.TenantId != tenantId.Value || conn.ProviderType != ProviderType.Trendyol)
+            throw new NotFoundException($"Trendyol connection not found for tenant. connectionId={request.ConnectionId}");
+
+        var sellerId = conn.ExternalAccountId ?? throw new InvalidOperationException("SellerId missing on connection.");
+
         var credsJson = _secrets.Unprotect(conn.AccessToken);
-        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Trendyol credentials invalid.");
+        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson)
+                    ?? throw new InvalidOperationException("Trendyol credentials invalid (json).");
 
-        var end = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var start = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
+        var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var startMs = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
 
-        _ = await _client.GetOrdersAsync(creds.ApiKey, creds.ApiSecret, supplierId, page: 0, size: 1, status: "Created", startDateMs: start, endDateMs: end, ct);
+        _ = await _client.GetOrdersAsync(
+            apiKey: creds.ApiKey,
+            apiSecret: creds.ApiSecret,
+            sellerId: sellerId,
+            userAgent: creds.UserAgent,
+            startDateMs: startMs,
+            endDateMs: endMs,
+            page: 0,
+            size: 1,
+            orderByField: _opts.OrderByField,
+            ct: ct);
+
         return true;
     }
 
-    private sealed record TrendyolCreds(string ApiKey, string ApiSecret);
+    private sealed record TrendyolCreds(string ApiKey, string ApiSecret, string UserAgent);
 }

@@ -1,13 +1,17 @@
-﻿namespace Profiqo.Application.Abstractions.Integrations.Trendyol;
+﻿// Path: backend/src/Profiqo.Application/Abstractions/Integrations/Trendyol/TrendyolOptions.cs
+namespace Profiqo.Application.Abstractions.Integrations.Trendyol;
 
 public sealed class TrendyolOptions
 {
-    public string BaseUrl { get; init; } = "https://api.trendyol.com/sapigw";
-    public string DefaultStatus { get; init; } = "Created";
+    public string BaseUrl { get; init; } = "https://apigw.trendyol.com";
+    public string IntegrationPrefix { get; init; } = "/integration";
 
-    public int DefaultPageSize { get; init; } = 50;
+    public int PageSizeMax { get; init; } = 200;
+    public int DefaultPageSize { get; init; } = 200;
     public int DefaultMaxPages { get; init; } = 20;
 
-    // incremental backfill window for first sync
-    public int InitialBackfillDays { get; init; } = 30;
+    // Trendyol max 3 ay geçmiş data: biz 90 gün alıyoruz
+    public int BackfillDays { get; init; } = 90;
+
+    public string OrderByField { get; init; } = "CreatedDate";
 }

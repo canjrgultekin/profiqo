@@ -1,9 +1,11 @@
-﻿using System.Text.Json;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/Commands/ConnectTrendyol/ConnectTrendyolCommandHandler.cs
+using System.Text.Json;
 
 using MediatR;
 
+using Microsoft.Extensions.Options;
+
 using Profiqo.Application.Abstractions.Crypto;
-using Profiqo.Application.Abstractions.Id;
 using Profiqo.Application.Abstractions.Integrations.Trendyol;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Application.Abstractions.Tenancy;
@@ -17,59 +19,45 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
     private readonly ITenantContext _tenant;
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
-    private readonly IIdGenerator _ids;
     private readonly ITrendyolClient _client;
+    private readonly TrendyolOptions _opts;
 
     public ConnectTrendyolCommandHandler(
         ITenantContext tenant,
         IProviderConnectionRepository connections,
         ISecretProtector secrets,
-        IIdGenerator ids,
-        ITrendyolClient client)
+        ITrendyolClient client,
+        IOptions<TrendyolOptions> opts)
     {
         _tenant = tenant;
         _connections = connections;
         _secrets = secrets;
-        _ids = ids;
         _client = client;
+        _opts = opts.Value;
     }
 
     public async Task<Guid> Handle(ConnectTrendyolCommand request, CancellationToken ct)
     {
         var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null)
-            throw new UnauthorizedException("Tenant context missing.");
+        if (tenantId is null) throw new UnauthorizedException("Tenant context missing.");
 
-        var supplierId = (request.SupplierId ?? "").Trim();
+        var sellerId = (request.SellerId ?? "").Trim();
         var apiKey = (request.ApiKey ?? "").Trim();
         var apiSecret = (request.ApiSecret ?? "").Trim();
         var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? "Trendyol" : request.DisplayName.Trim();
+        var userAgent = string.IsNullOrWhiteSpace(request.UserAgent) ? $"Profiqo/{sellerId}" : request.UserAgent!.Trim();
 
-        if (string.IsNullOrWhiteSpace(supplierId))
-            throw new ArgumentException("SupplierId required.", nameof(request.SupplierId));
+        if (string.IsNullOrWhiteSpace(sellerId)) throw new ArgumentException("SellerId required.", nameof(request.SellerId));
+        if (string.IsNullOrWhiteSpace(apiKey)) throw new ArgumentException("ApiKey required.", nameof(request.ApiKey));
+        if (string.IsNullOrWhiteSpace(apiSecret)) throw new ArgumentException("ApiSecret required.", nameof(request.ApiSecret));
 
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new ArgumentException("ApiKey required.", nameof(request.ApiKey));
+        var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var startMs = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
 
-        if (string.IsNullOrWhiteSpace(apiSecret))
-            throw new ArgumentException("ApiSecret required.", nameof(request.ApiSecret));
+        // validate 200
+        _ = await _client.GetOrdersAsync(apiKey, apiSecret, sellerId, userAgent, startMs, endMs, 0, 1, _opts.OrderByField, ct);
 
-        // Quick connectivity test (1 page, narrow window)
-        var end = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var start = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
-
-        _ = await _client.GetOrdersAsync(
-            apiKey: apiKey,
-            apiSecret: apiSecret,
-            supplierId: supplierId,
-            page: 0,
-            size: 1,
-            status: "Created",
-            startDateMs: start,
-            endDateMs: end,
-            ct: ct);
-
-        var credsJson = JsonSerializer.Serialize(new TrendyolCreds(apiKey, apiSecret));
+        var credsJson = JsonSerializer.Serialize(new TrendyolCreds(apiKey, apiSecret, userAgent));
         var enc = _secrets.Protect(credsJson);
 
         var existing = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Trendyol, ct);
@@ -80,7 +68,7 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
                 tenantId: tenantId.Value,
                 providerType: ProviderType.Trendyol,
                 displayName: displayName,
-                externalAccountId: supplierId,
+                externalAccountId: sellerId,
                 accessToken: enc,
                 refreshToken: null,
                 accessTokenExpiresAtUtc: null,
@@ -90,11 +78,10 @@ internal sealed class ConnectTrendyolCommandHandler : IRequestHandler<ConnectTre
             return created.Id.Value;
         }
 
-        existing.UpdateProfile(displayName, supplierId, DateTimeOffset.UtcNow);
+        existing.UpdateProfile(displayName, sellerId, DateTimeOffset.UtcNow);
         existing.RotateTokens(enc, null, null, DateTimeOffset.UtcNow);
-
         return existing.Id.Value;
     }
 
-    private sealed record TrendyolCreds(string ApiKey, string ApiSecret);
+    private sealed record TrendyolCreds(string ApiKey, string ApiSecret, string UserAgent);
 }

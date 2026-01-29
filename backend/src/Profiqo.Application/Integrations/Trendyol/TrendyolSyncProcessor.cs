@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/TrendyolSyncProcessor.cs
+using System.Text.Json;
 
 using Microsoft.Extensions.Options;
 
@@ -11,9 +12,10 @@ using Profiqo.Domain.Integrations;
 
 namespace Profiqo.Application.Integrations.Trendyol;
 
+
 public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 {
-    private const string CursorKey = "trendyol.orders.cursor.startDateMs";
+    private const string CursorKey = "trendyol.orders.cursor.lastOrderDateMs";
 
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
@@ -43,98 +45,111 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 
     public async Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
     {
-        var conn = await _connections.GetByIdAsync(new ProviderConnectionId(connectionId), ct);
+        var connId = new ProviderConnectionId(connectionId);
+        var conn = await _connections.GetByIdAsync(connId, ct);
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Trendyol)
             throw new InvalidOperationException("Trendyol connection not found for tenant.");
 
+        var sellerId = conn.ExternalAccountId ?? throw new InvalidOperationException("SellerId missing.");
         var credsJson = _secrets.Unprotect(conn.AccessToken);
-        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Trendyol credentials invalid.");
-        var supplierId = conn.ExternalAccountId ?? throw new InvalidOperationException("Trendyol supplierId missing.");
+        var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Invalid credentials");
 
-        var cursor = await _cursors.GetAsync(tenantId, conn.Id, CursorKey, ct);
-        long? startMs = long.TryParse(cursor, out var ms) && ms > 0 ? ms : null;
+        var cursorRaw = await _cursors.GetAsync(tenantId, connId, CursorKey, ct);
+        long? cursorMs = long.TryParse(cursorRaw, out var c) && c > 0 ? c : null;
 
-        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var initialStart = DateTimeOffset.UtcNow.AddDays(-_opts.InitialBackfillDays).ToUnixTimeMilliseconds();
-        var effectiveStart = startMs ?? initialStart;
-        var endMs = nowMs;
+        var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var startMsDefault = DateTimeOffset.UtcNow.AddDays(-_opts.BackfillDays).ToUnixTimeMilliseconds();
+        var startMs = cursorMs ?? startMsDefault;
 
-        var status = string.IsNullOrWhiteSpace(_opts.DefaultStatus) ? "Created" : _opts.DefaultStatus;
+        var safeSize = pageSize <= 0 ? _opts.DefaultPageSize : Math.Min(pageSize, _opts.PageSizeMax);
 
         var processed = 0;
-        long maxSeenOrderDate = effectiveStart;
+        long maxSeenOrderDate = startMs;
 
         for (var page = 0; page < maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
             using var doc = await _client.GetOrdersAsync(
-                apiKey: creds.ApiKey,
-                apiSecret: creds.ApiSecret,
-                supplierId: supplierId,
-                page: page,
-                size: pageSize,
-                status: status,
-                startDateMs: effectiveStart,
-                endDateMs: endMs,
-                ct: ct);
+                creds.ApiKey,
+                creds.ApiSecret,
+                sellerId,
+                creds.UserAgent,
+                startMs,
+                endMs,
+                page,
+                safeSize,
+                _opts.OrderByField,
+                ct);
 
             var root = doc.RootElement;
 
-            // defensive: some responses nest under "content"
-            var arr = FindArray(root, new[] { "content", "items", "data", "orders" });
-            if (arr is null || arr.Value.GetArrayLength() == 0)
+            if (!root.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array || content.GetArrayLength() == 0)
                 break;
 
-            foreach (var o in arr.Value.EnumerateArray())
+            foreach (var o in content.EnumerateArray())
             {
                 ct.ThrowIfCancellationRequested();
 
-                var providerOrderId =
-                    ReadString(o, "orderNumber") ??
-                    ReadString(o, "id") ??
-                    Guid.NewGuid().ToString("N");
+                var shipmentPackageId = ReadString(o, "shipmentPackageId") ?? ReadString(o, "id") ?? Guid.NewGuid().ToString("N");
+                var orderNumber = ReadString(o, "orderNumber") ?? shipmentPackageId;
 
-                var orderDateMs =
-                    ReadInt64(o, "orderDate") ??
-                    ReadInt64(o, "orderDateMs") ??
-                    ReadInt64(o, "orderCreatedDate") ??
-                    effectiveStart;
-
+                var orderDateMs = ReadInt64(o, "orderDate") ?? startMs;
                 if (orderDateMs > maxSeenOrderDate) maxSeenOrderDate = orderDateMs;
 
-                var placedAtUtc = DateTimeOffset.FromUnixTimeMilliseconds(orderDateMs);
+                var orderDateUtc = DateTimeOffset.FromUnixTimeMilliseconds(orderDateMs);
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
-                var total = ReadDecimal(o, "totalPrice") ?? ReadDecimal(o, "totalAmount") ?? 0m;
 
-                var email = ReadString(o, "customerEmail") ?? ReadString(o, "email");
-                var phone = ReadString(o, "customerPhone") ?? ReadString(o, "phone");
+                // Trendyol response: totalPrice is net price after discounts (your sample)
+                var totalPrice = ReadDecimal(o, "totalPrice") ?? ReadDecimal(o, "packageTotalPrice") ?? 0m;
+
+                var email = ReadString(o, "customerEmail");
+                var firstName = ReadString(o, "customerFirstName");
+                var lastName = ReadString(o, "customerLastName");
+
+                // phone often null in shipmentAddress.phone; still try it
+                string? phone = null;
+                if (o.TryGetProperty("shipmentAddress", out var sa) && sa.ValueKind == JsonValueKind.Object)
+                    phone = ReadString(sa, "phone");
 
                 var lines = new List<TrendyolOrderLineUpsert>();
 
-                var lineArr = FindArray(o, new[] { "lines", "orderLines", "items" });
-                if (lineArr.HasValue)
+                if (o.TryGetProperty("lines", out var li) && li.ValueKind == JsonValueKind.Array)
                 {
-                    foreach (var li in lineArr.Value.EnumerateArray())
+                    foreach (var l in li.EnumerateArray())
                     {
-                        var sku = ReadString(li, "barcode") ?? ReadString(li, "sku") ?? ReadString(li, "merchantSku");
-                        var name = ReadString(li, "productName") ?? ReadString(li, "name") ?? "unknown";
-                        var qty = (int)(ReadInt64(li, "quantity") ?? 1);
-                        var unit = ReadDecimal(li, "price") ?? ReadDecimal(li, "unitPrice") ?? 0m;
-                        var lineTotal = ReadDecimal(li, "totalPrice") ?? (unit * qty);
+                        var sku =
+                            ReadString(l, "merchantSku") ??
+                            ReadString(l, "sku") ??
+                            ReadString(l, "barcode") ??
+                            ReadString(l, "stockCode") ??
+                            "NA";
 
-                        lines.Add(new TrendyolOrderLineUpsert(sku, name, qty, unit, lineTotal, currency));
+                        var productName = ReadString(l, "productName") ?? "unknown";
+                        var qty = (int)(ReadInt64(l, "quantity") ?? 1);
+
+                        // sample: lineUnitPrice exists and is net per item
+                        var unit = ReadDecimal(l, "lineUnitPrice")
+                                   ?? ReadDecimal(l, "price")
+                                   ?? 0m;
+
+                        var lineCurrency = ReadString(l, "currencyCode") ?? currency;
+
+                        lines.Add(new TrendyolOrderLineUpsert(sku, productName, qty, unit, lineCurrency));
                     }
                 }
 
                 var model = new TrendyolOrderUpsert(
-                    ProviderOrderId: providerOrderId,
-                    PlacedAtUtc: placedAtUtc,
+                    ShipmentPackageId: shipmentPackageId,
+                    OrderNumber: orderNumber,
+                    OrderDateUtc: orderDateUtc,
                     CurrencyCode: currency,
-                    TotalAmount: total,
+                    TotalPrice: totalPrice,
                     CustomerEmail: email,
                     CustomerPhone: phone,
+                    CustomerFirstName: firstName,
+                    CustomerLastName: lastName,
                     Lines: lines,
                     PayloadJson: o.GetRawText());
 
@@ -146,25 +161,19 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
             }
 
             await _jobs.MarkProgressAsync(jobId, processed, ct);
+
+            // If we got less than requested size, no more pages
+            if (content.GetArrayLength() < safeSize)
+                break;
         }
 
-        var nextCursor = maxSeenOrderDate > 0 ? (maxSeenOrderDate + 1) : (nowMs + 1);
-        await _cursors.UpsertAsync(tenantId, conn.Id, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
+        var nextCursor = maxSeenOrderDate > 0 ? (maxSeenOrderDate + 1) : (endMs + 1);
+        await _cursors.UpsertAsync(tenantId, connId, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;
     }
 
-    private sealed record TrendyolCreds(string ApiKey, string ApiSecret);
-
-    private static JsonElement? FindArray(JsonElement root, string[] keys)
-    {
-        foreach (var k in keys)
-        {
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty(k, out var p) && p.ValueKind == JsonValueKind.Array)
-                return p;
-        }
-        return null;
-    }
+    private sealed record TrendyolCreds(string ApiKey, string ApiSecret, string UserAgent);
 
     private static string? ReadString(JsonElement obj, string name)
         => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
@@ -175,8 +184,9 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
     private static decimal? ReadDecimal(JsonElement obj, string name)
     {
         if (obj.ValueKind != JsonValueKind.Object) return null;
-        if (!obj.TryGetProperty(name, out var p) || p.ValueKind != JsonValueKind.Number) return null;
-        if (p.TryGetDecimal(out var d)) return d;
-        return (decimal)p.GetDouble();
+        if (!obj.TryGetProperty(name, out var p)) return null;
+        if (p.ValueKind == JsonValueKind.Number && p.TryGetDecimal(out var d)) return d;
+        if (p.ValueKind == JsonValueKind.String && decimal.TryParse(p.GetString(), out var x)) return x;
+        return null;
     }
 }
