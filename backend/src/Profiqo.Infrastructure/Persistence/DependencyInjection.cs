@@ -1,4 +1,6 @@
-﻿using Confluent.Kafka;
+﻿using System.Reflection.Emit;
+
+using Confluent.Kafka;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -8,6 +10,7 @@ using Profiqo.Application.Abstractions.Id;
 using Profiqo.Application.Abstractions.Integrations.Trendyol;
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
+using Profiqo.Application.Customers.Dedupe;
 using Profiqo.Application.Integrations.Trendyol;
 using Profiqo.Infrastructure.Integrations.Trendyol;
 using Profiqo.Infrastructure.Persistence.Interceptors;
@@ -66,6 +69,14 @@ public static class DependencyInjection
         services.AddHttpClient<ITrendyolClient, TrendyolClient>();
         services.AddScoped<ITrendyolSyncStore, TrendyolSyncStore>();
         services.AddScoped<ITrendyolSyncProcessor, TrendyolSyncProcessor>();
+        // ✅ Dedupe analysis
+        services.AddScoped<ICustomerDedupeAnalysisRepository, CustomerDedupeAnalysisRepository>();
+
+        // ✅ NEW: suggestions repository
+        services.AddScoped<ICustomerMergeSuggestionRepository, CustomerMergeSuggestionRepository>();
+
+
+        // Path: backend/src/Profiqo.Infrastructure/Persistence/ProfiqoDbContext.cs  (OnModelCreating içine)
 
         return services;
     }

@@ -10,6 +10,7 @@ using Profiqo.Domain.Orders;
 using Profiqo.Domain.Tenants;
 using Profiqo.Domain.Users;
 using Profiqo.Infrastructure.Persistence.Entities;
+using Profiqo.Infrastructure.Persistence.QueryTypes;
 
 namespace Profiqo.Infrastructure.Persistence;
 
@@ -58,7 +59,12 @@ public sealed class ProfiqoDbContext : DbContext
         modelBuilder.Entity<InboxMessage>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<IngestionEvent>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<IntegrationCursor>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
-
+     
+        modelBuilder.Entity<CustomerOrderAggRowDb>(b =>
+        {
+            b.HasNoKey();
+            b.ToView(null); // keyless query type
+        });
         base.OnModelCreating(modelBuilder);
     }
 }

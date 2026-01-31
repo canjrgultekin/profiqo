@@ -6,22 +6,36 @@ export const NAV_DATA = [
     label: "MAIN MENU",
     items: [
       { title: "Dashboard", icon: Icons.HomeIcon, items: [{ title: "eCommerce", url: "/" }] },
-      { title: "Customers", url: "/customers", icon: Icons.User, items: [] },
+
+      // ✅ Customers altına Identity Analyze eklendi
+      {
+        title: "Customers",
+        url: "/customers",
+        icon: Icons.User,
+        items: [
+          { title: "Customers", url: "/customers" },
+          { title: "Identity Analyze", url: "/customers/dedupe" },
+        ],
+      },
+
       { title: "Orders", url: "/orders", icon: Icons.Table, items: [] },
+
       {
         title: "Reports",
         icon: Icons.Alphabet,
         items: [{ title: "Abandoned Carts", url: "/reports/abandoned-carts" }],
       },
+
       {
         title: "Integrations",
         icon: Icons.Alphabet,
         items: [
           { title: "Overview", url: "/integrations" },
           { title: "Ikas", url: "/integrations/ikas" },
-          { title: "Trendyol", url: "/integrations/trendyol" }
+          { title: "Trendyol", url: "/integrations/trendyol" },
         ],
       },
+
       {
         title: "Settings",
         icon: Icons.Alphabet,
