@@ -75,9 +75,6 @@ public static class DependencyInjection
         // ✅ NEW: suggestions repository
         services.AddScoped<ICustomerMergeSuggestionRepository, CustomerMergeSuggestionRepository>();
 
-
-        // Path: backend/src/Profiqo.Infrastructure/Persistence/ProfiqoDbContext.cs  (OnModelCreating içine)
-
         return services;
     }
 }

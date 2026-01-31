@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Infrastructure/Persistence/Repositories/CustomerMergeSuggestionRepository.cs
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 using Profiqo.Application.Customers.Dedupe;
 using Profiqo.Domain.Common.Ids;

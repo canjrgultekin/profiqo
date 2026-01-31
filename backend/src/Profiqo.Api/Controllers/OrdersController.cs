@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Api/Controllers/OrdersController.cs
-using System.Text.Json;
+﻿using System.Text.Json;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,6 +8,7 @@ using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Entities;
 
 namespace Profiqo.Api.Controllers;
 
@@ -52,7 +52,9 @@ public sealed class OrdersController : ControllerBase
                 totalAmount = new { amount = o.TotalAmount.Amount, currency = o.TotalAmount.Currency.Value },
 
                 shippingAddressJson = EF.Property<string?>(o, "ShippingAddressJson"),
-                billingAddressJson = EF.Property<string?>(o, "BillingAddressJson")
+                billingAddressJson = EF.Property<string?>(o, "BillingAddressJson"),
+
+                sourceCustomerId = o.CustomerId.Value
             })
             .ToListAsync(ct);
 
@@ -71,13 +73,11 @@ public sealed class OrdersController : ControllerBase
                 string? postalCode = null;
                 string? country = null;
 
-                // Trendyol normalized json
                 if (root.TryGetProperty("city", out var c) && c.ValueKind == JsonValueKind.String) city = c.GetString();
                 if (root.TryGetProperty("district", out var d) && d.ValueKind == JsonValueKind.String) district = d.GetString();
                 if (root.TryGetProperty("postalCode", out var p) && p.ValueKind == JsonValueKind.String) postalCode = p.GetString();
                 if (root.TryGetProperty("country", out var co) && co.ValueKind == JsonValueKind.String) country = co.GetString();
 
-                // Ikas raw json: city{name}, district{name}, country{code/name}
                 if (city is null && root.TryGetProperty("city", out var ic) && ic.ValueKind == JsonValueKind.Object)
                     city = ic.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
 
@@ -103,16 +103,43 @@ public sealed class OrdersController : ControllerBase
             }
         }
 
-        var mapped = items.Select(x => new
+        var sourceIds = items.Select(x => x.sourceCustomerId).Distinct().ToList();
+
+        // ✅ Guid -> CustomerId typed
+        var sourceTyped = sourceIds.Select(x => new CustomerId(x)).ToList();
+
+        var linkRows = await _db.Set<CustomerMergeLink>().AsNoTracking()
+            .Where(l => l.TenantId == tenantId.Value && sourceTyped.Contains(l.SourceCustomerId)) // ✅ Value yok
+            .Select(l => new
+            {
+                sourceId = l.SourceCustomerId.Value,
+                canonicalId = l.CanonicalCustomerId.Value
+            })
+            .ToListAsync(ct);
+
+
+        var canonicalBySource = linkRows.ToDictionary(x => x.sourceId, x => x.canonicalId);
+
+        var mapped = items.Select(x =>
         {
-            x.orderId,
-            x.providerOrderId,
-            x.channel,
-            x.status,
-            x.placedAtUtc,
-            x.totalAmount,
-            shipping = ParseMini(x.shippingAddressJson),
-            billing = ParseMini(x.billingAddressJson)
+            var canonicalCustomerId = canonicalBySource.TryGetValue(x.sourceCustomerId, out var can)
+                ? can
+                : x.sourceCustomerId;
+
+            return new
+            {
+                x.orderId,
+                x.providerOrderId,
+                x.channel,
+                x.status,
+                x.placedAtUtc,
+                x.totalAmount,
+                shipping = ParseMini(x.shippingAddressJson),
+                billing = ParseMini(x.billingAddressJson),
+
+                customerId = canonicalCustomerId,
+                x.sourceCustomerId
+            };
         });
 
         return Ok(new { page, pageSize, total, items = mapped });
@@ -127,7 +154,7 @@ public sealed class OrdersController : ControllerBase
         var oid = new OrderId(orderId);
 
         var o = await _db.Orders.AsNoTracking()
-            .Where(x => x.TenantId == tenantId.Value && x.Id == oid) // ✅ FIX: no .Value in predicate
+            .Where(x => x.TenantId == tenantId.Value && x.Id == oid)
             .Select(x => new
             {
                 orderId = x.Id.Value,
@@ -147,23 +174,27 @@ public sealed class OrdersController : ControllerBase
                     quantity = l.Quantity,
                     unitPrice = new { amount = l.UnitPrice.Amount, currency = l.UnitPrice.Currency.Value },
                     lineTotal = new { amount = l.LineTotal.Amount, currency = l.LineTotal.Currency.Value }
-                }).ToList()
+                }).ToList(),
+
+                sourceCustomerId = x.CustomerId.Value
             })
             .FirstOrDefaultAsync(ct);
 
         if (o is null) return NotFound(new { message = "Order not found." });
 
+        var sourceCustomerId = new CustomerId(o.sourceCustomerId);
+
+        var link = await _db.Set<CustomerMergeLink>().AsNoTracking()
+            .FirstOrDefaultAsync(l => l.TenantId == tenantId.Value && l.SourceCustomerId == sourceCustomerId, ct);
+
+
+        var canonicalCustomerId = link?.CanonicalCustomerId.Value ?? o.sourceCustomerId;
+
         object? ParseObj(string? json)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
-            try
-            {
-                return JsonSerializer.Deserialize<object>(json);
-            }
-            catch
-            {
-                return new { raw = json };
-            }
+            try { return JsonSerializer.Deserialize<object>(json); }
+            catch { return new { raw = json }; }
         }
 
         return Ok(new
@@ -176,7 +207,10 @@ public sealed class OrdersController : ControllerBase
             o.totalAmount,
             shippingAddress = ParseObj(o.shippingAddressJson),
             billingAddress = ParseObj(o.billingAddressJson),
-            lines = o.lines
+            lines = o.lines,
+
+            customerId = canonicalCustomerId,
+            o.sourceCustomerId
         });
     }
 }

@@ -1,11 +1,11 @@
-﻿// Path: backend/src/Profiqo.Infrastructure/Persistence/Repositories/CustomerDedupeAnalysisRepository.cs
-using System.Text.Json;
+﻿using System.Text.Json;
 
 using Microsoft.EntityFrameworkCore;
 
 using Profiqo.Application.Customers.Dedupe;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Entities;
 using Profiqo.Infrastructure.Persistence.QueryTypes;
 
 namespace Profiqo.Infrastructure.Persistence.Repositories;
@@ -21,18 +21,25 @@ internal sealed class CustomerDedupeAnalysisRepository : ICustomerDedupeAnalysis
 
     public async Task<IReadOnlyList<CustomerDedupeRow>> GetCustomerRowsAsync(TenantId tenantId, CancellationToken ct)
     {
-        return await _db.Customers.AsNoTracking()
-            .Where(c => c.TenantId == tenantId)
-            .Select(c => new CustomerDedupeRow(
+        // ✅ Approved merge sonrası source customer’ları analiz dataset’inden çıkar
+        var rows = await (
+            from c in _db.Customers.AsNoTracking()
+            where c.TenantId == tenantId
+            join ml in _db.Set<CustomerMergeLink>().AsNoTracking().Where(x => x.TenantId == tenantId)
+                on c.Id equals ml.SourceCustomerId into mlj
+            from ml in mlj.DefaultIfEmpty()
+            where ml == null
+            select new CustomerDedupeRow(
                 CustomerId: c.Id.Value,
                 FirstName: c.FirstName,
-                LastName: c.LastName))
-            .ToListAsync(ct);
+                LastName: c.LastName)
+        ).ToListAsync(ct);
+
+        return rows;
     }
 
     public async Task<IReadOnlyList<CustomerOrderAggRow>> GetOrderAggsAsync(TenantId tenantId, CancellationToken ct)
     {
-        // ✅ IMPORTANT: aliases must be snake_case because you use snake case naming conventions in EF/Npgsql
         const string sql = @"
 SELECT
   o.customer_id        AS customer_id,

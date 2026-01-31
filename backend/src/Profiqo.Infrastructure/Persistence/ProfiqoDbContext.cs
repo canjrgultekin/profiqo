@@ -45,10 +45,8 @@ public sealed class ProfiqoDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ProfiqoDbContext).Assembly);
 
-        // Force owned type discovery for EF (prevents "CustomerConsent requires PK" issue)
         modelBuilder.Owned<CustomerConsent>();
 
-        // Tenant scoping (fail-closed)
         modelBuilder.Entity<Customer>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<Order>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<ProviderConnection>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
@@ -59,12 +57,21 @@ public sealed class ProfiqoDbContext : DbContext
         modelBuilder.Entity<InboxMessage>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<IngestionEvent>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<IntegrationCursor>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
-     
+
+        // ✅ NEW: merge tables
+        modelBuilder.Entity<CustomerMergeLink>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
+        modelBuilder.Entity<CustomerMergeDecision>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
+
+        // ✅ Suggestions entity uses Guid tenant_id (legacy), scope it
+        modelBuilder.Entity<CustomerMergeSuggestion>()
+            .HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value.Value);
+
         modelBuilder.Entity<CustomerOrderAggRowDb>(b =>
         {
             b.HasNoKey();
-            b.ToView(null); // keyless query type
+            b.ToView(null);
         });
+
         base.OnModelCreating(modelBuilder);
     }
 }

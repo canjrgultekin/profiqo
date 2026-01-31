@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 using FluentValidation.AspNetCore;
 
@@ -40,7 +41,13 @@ builder.Host.UseSerilog((ctx, lc) =>
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddControllers()
-    .AddJsonOptions(o => o.JsonSerializerOptions.PropertyNamingPolicy = null);
+    .AddJsonOptions(o =>
+    {
+        // Frontend expects camelCase (Next.js). Keep it consistent across DTOs/anonymous projections.
+        o.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        o.JsonSerializerOptions.DictionaryKeyPolicy = JsonNamingPolicy.CamelCase;
+        o.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
 
 builder.Services.AddFluentValidationAutoValidation();
 

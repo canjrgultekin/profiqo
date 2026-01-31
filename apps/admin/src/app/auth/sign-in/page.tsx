@@ -4,9 +4,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
-export const metadata: Metadata = {
-  title: "Sign in",
-};
+export const metadata: Metadata = { title: "Sign in" };
 
 export default function SignIn() {
   return (
@@ -39,6 +37,7 @@ export default function SignIn() {
                   height={32}
                 />
               </Link>
+
               <p className="mb-3 text-xl font-medium text-dark dark:text-white">
                 Sign in to your account
               </p>
@@ -48,14 +47,13 @@ export default function SignIn() {
               </h1>
 
               <p className="w-full max-w-[375px] font-medium text-dark-4 dark:text-dark-6">
-                Please sign in to your account by completing the necessary
-                fields below
+                Please sign in to continue.
               </p>
 
               <div className="mt-31">
                 <Image
                   src={"/images/grids/grid-02.svg"}
-                  alt="Logo"
+                  alt="Grid"
                   width={405}
                   height={325}
                   className="mx-auto dark:opacity-30"

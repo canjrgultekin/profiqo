@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Application/Customers/Dedupe/ICustomerMergeSuggestionRepository.cs
-using Profiqo.Domain.Common.Ids;
+﻿using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Application.Customers.Dedupe;
 

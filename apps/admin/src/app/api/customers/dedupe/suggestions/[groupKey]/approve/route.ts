@@ -10,25 +10,24 @@ function apiBaseUrl(): string {
   return process.env.API_BASE_URL?.trim() || "http://localhost:5164";
 }
 
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
+export async function POST(_req: Request, { params }: { params: Promise<{ groupKey: string }> }) {
+  const { groupKey } = await params;
 
   const c = await cookies();
   const token = c.get(ACCESS_COOKIE)?.value;
   const tenantId = c.get(TENANT_COOKIE)?.value;
 
-  if (!token) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-  if (!tenantId) return NextResponse.json({ message: "Tenant cookie missing" }, { status: 400 });
+  if (!token || !tenantId) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
 
-  const upstream = await fetch(`${apiBaseUrl()}/api/customers/dedupe/analyze`, {
+  const upstream = await fetch(`${apiBaseUrl()}/api/customers/dedupe/suggestions/${encodeURIComponent(groupKey)}/approve`, {
     method: "POST",
     headers: {
-      "content-type": "application/json",
       Authorization: `Bearer ${token}`,
       "X-Tenant-Id": tenantId,
     },
     cache: "no-store",
-    body: JSON.stringify(body),
   });
 
   const text = await upstream.text();

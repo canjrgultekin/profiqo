@@ -6,6 +6,7 @@ using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Entities;
 
 namespace Profiqo.Api.Controllers;
 
@@ -23,6 +24,28 @@ public sealed class CustomersController : ControllerBase
         _tenant = tenant;
     }
 
+    private async Task<CustomerId> ResolveCanonicalAsync(TenantId tenantId, CustomerId input, CancellationToken ct)
+    {
+        // Chain ihtimaline karşı limitli takip
+        var current = input;
+
+        for (var i = 0; i < 8; i++)
+        {
+            var link = await _db.Set<CustomerMergeLink>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SourceCustomerId == current, ct);
+
+            if (link is null) break;
+
+            if (link.CanonicalCustomerId.Equals(current))
+                break;
+
+            current = link.CanonicalCustomerId;
+        }
+
+        return current;
+    }
+
     [HttpGet]
     public async Task<IActionResult> List(
         [FromQuery] int page = 1,
@@ -36,35 +59,78 @@ public sealed class CustomersController : ControllerBase
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 200 ? 25 : pageSize;
 
-        var query = _db.Customers.AsNoTracking()
+        var links = _db.Set<CustomerMergeLink>().AsNoTracking()
             .Where(x => x.TenantId == tenantId.Value);
+
+        var baseQuery =
+            from c in _db.Customers.AsNoTracking()
+            where c.TenantId == tenantId.Value
+            join ml in links on c.Id equals ml.SourceCustomerId into mlj
+            from ml in mlj.DefaultIfEmpty()
+            select new
+            {
+                Customer = c,
+                CanonicalCustomerId = ml != null ? ml.CanonicalCustomerId : c.Id
+            };
 
         if (!string.IsNullOrWhiteSpace(q))
         {
             var s = q.Trim();
-            query = query.Where(x =>
-                (x.FirstName != null && EF.Functions.ILike(x.FirstName, $"%{s}%")) ||
-                (x.LastName != null && EF.Functions.ILike(x.LastName, $"%{s}%")));
+            baseQuery = baseQuery.Where(x =>
+                (x.Customer.FirstName != null && EF.Functions.ILike(x.Customer.FirstName, $"%{s}%")) ||
+                (x.Customer.LastName != null && EF.Functions.ILike(x.Customer.LastName, $"%{s}%")));
         }
 
-        var total = await query.CountAsync(ct);
+        var grouped = baseQuery
+            .GroupBy(x => x.CanonicalCustomerId)
+            .Select(g => new
+            {
+                CanonicalCustomerId = g.Key,
+                FirstSeenAtUtc = g.Min(x => x.Customer.FirstSeenAtUtc),
+                LastSeenAtUtc = g.Max(x => x.Customer.LastSeenAtUtc)
+            });
 
-        var items = await query
+        var total = await grouped.CountAsync(ct);
+
+        var pageRows = await grouped
             .OrderByDescending(x => x.LastSeenAtUtc)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .ToListAsync(ct);
+
+        var canonicalIds = pageRows.Select(x => x.CanonicalCustomerId).ToList();
+
+        var canonicalCustomers = await _db.Customers.AsNoTracking()
+            .Where(x => x.TenantId == tenantId.Value && canonicalIds.Contains(x.Id))
             .Select(x => new
             {
-                customerId = x.Id.Value, // projection ok
+                customerId = x.Id.Value,
                 firstName = x.FirstName,
                 lastName = x.LastName,
-                firstSeenAtUtc = x.FirstSeenAtUtc,
-                lastSeenAtUtc = x.LastSeenAtUtc,
                 rfmSegment = x.Rfm != null ? x.Rfm.Segment.ToString() : null,
                 churnRisk = x.AiScores != null ? x.AiScores.ChurnRiskScore : (int?)null,
                 ltv12mProfit = x.AiScores != null ? x.AiScores.Ltv12mProfit : (decimal?)null
             })
             .ToListAsync(ct);
+
+        var map = canonicalCustomers.ToDictionary(x => x.customerId, x => x);
+
+        var items = pageRows.Select(r =>
+        {
+            map.TryGetValue(r.CanonicalCustomerId.Value, out var c);
+
+            return new
+            {
+                customerId = r.CanonicalCustomerId.Value,
+                firstName = c?.firstName,
+                lastName = c?.lastName,
+                firstSeenAtUtc = r.FirstSeenAtUtc,
+                lastSeenAtUtc = r.LastSeenAtUtc,
+                rfmSegment = c?.rfmSegment,
+                churnRisk = c?.churnRisk,
+                ltv12mProfit = c?.ltv12mProfit
+            };
+        });
 
         return Ok(new { page, pageSize, total, items });
     }
@@ -75,10 +141,19 @@ public sealed class CustomersController : ControllerBase
         var tenantId = _tenant.CurrentTenantId;
         if (tenantId is null) return BadRequest(new { message = "Tenant context missing." });
 
-        var cid = new CustomerId(customerId);
+        var input = new CustomerId(customerId);
+        var canonical = await ResolveCanonicalAsync(tenantId.Value, input, ct);
 
-        var c = await _db.Customers.AsNoTracking()
-            .Where(x => x.TenantId == tenantId.Value && x.Id == cid) // ✅ FIX
+        var memberIds = await _db.Set<CustomerMergeLink>().AsNoTracking()
+            .Where(x => x.TenantId == tenantId.Value && x.CanonicalCustomerId == canonical)
+            .Select(x => x.SourceCustomerId)
+            .ToListAsync(ct);
+
+        // canonical kendisi de member
+        memberIds.Add(canonical);
+
+        var rows = await _db.Customers.AsNoTracking()
+            .Where(x => x.TenantId == tenantId.Value && memberIds.Contains(x.Id))
             .Select(x => new
             {
                 customerId = x.Id.Value,
@@ -117,10 +192,40 @@ public sealed class CustomersController : ControllerBase
                     })
                     .ToList()
             })
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
-        if (c is null) return NotFound(new { message = "Customer not found." });
-        return Ok(c);
+        var canonicalRow = rows.FirstOrDefault(x => x.customerId == canonical.Value);
+        if (canonicalRow is null) return NotFound(new { message = "Customer not found." });
+
+        var firstSeen = rows.Min(x => x.firstSeenAtUtc);
+        var lastSeen = rows.Max(x => x.lastSeenAtUtc);
+
+        var mergedIdentities = rows
+            .SelectMany(x => x.identities)
+            .GroupBy(i => new { i.type, i.valueHash, i.sourceProvider, i.sourceExternalId })
+            .Select(g => g.OrderByDescending(x => x.lastSeenAtUtc).First())
+            .OrderByDescending(x => x.lastSeenAtUtc)
+            .ToList();
+
+        return Ok(new
+        {
+            customerId = canonical.Value,
+            canonicalCustomerId = canonical.Value,
+            mergedFromCustomerIds = rows.Select(x => x.customerId).Distinct().OrderBy(x => x).ToArray(),
+
+            firstName = canonicalRow.firstName,
+            lastName = canonicalRow.lastName,
+
+            firstSeenAtUtc = firstSeen,
+            lastSeenAtUtc = lastSeen,
+
+            createdAtUtc = canonicalRow.createdAtUtc,
+            updatedAtUtc = canonicalRow.updatedAtUtc,
+
+            rfm = canonicalRow.rfm,
+            ai = canonicalRow.ai,
+            identities = mergedIdentities
+        });
     }
 
     [HttpGet("{customerId:guid}/orders")]
@@ -129,15 +234,25 @@ public sealed class CustomersController : ControllerBase
         var tenantId = _tenant.CurrentTenantId;
         if (tenantId is null) return BadRequest(new { message = "Tenant context missing." });
 
-        var cid = new CustomerId(customerId);
+        var input = new CustomerId(customerId);
+        var canonical = await ResolveCanonicalAsync(tenantId.Value, input, ct);
 
-        var exists = await _db.Customers.AsNoTracking()
-            .AnyAsync(x => x.TenantId == tenantId.Value && x.Id == cid, ct); // ✅ FIX
+        // canonical + tüm source’lar
+        var memberIds = await _db.Set<CustomerMergeLink>().AsNoTracking()
+            .Where(x => x.TenantId == tenantId.Value && x.CanonicalCustomerId == canonical)
+            .Select(x => x.SourceCustomerId)
+            .ToListAsync(ct);
 
-        if (!exists) return NotFound(new { message = "Customer not found." });
+        memberIds.Add(canonical);
+
+        // canonical müşteri var mı (source id ile gelmişse canonical’a çözdük, o yüzden kontrol bu)
+        var canonicalExists = await _db.Customers.AsNoTracking()
+            .AnyAsync(x => x.TenantId == tenantId.Value && x.Id == canonical, ct);
+
+        if (!canonicalExists) return NotFound(new { message = "Customer not found." });
 
         var orders = await _db.Orders.AsNoTracking()
-            .Where(o => o.TenantId == tenantId.Value && o.CustomerId == cid) // ✅ FIX
+            .Where(o => o.TenantId == tenantId.Value && memberIds.Contains(o.CustomerId))
             .OrderByDescending(o => o.PlacedAtUtc)
             .Select(o => new
             {
@@ -146,11 +261,18 @@ public sealed class CustomersController : ControllerBase
                 channel = o.Channel.ToString(),
                 status = o.Status.ToString(),
                 placedAtUtc = o.PlacedAtUtc,
+
                 totalAmount = o.TotalAmount.Amount,
                 totalCurrency = o.TotalAmount.Currency.Value,
+
                 netProfit = o.NetProfit.Amount,
                 netProfitCurrency = o.NetProfit.Currency.Value,
-                lineCount = o.Lines.Count
+
+                lineCount = o.Lines.Count,
+
+                // debug/trace: hangi source customer’dan gelmiş
+                sourceCustomerId = o.CustomerId.Value,
+                canonicalCustomerId = canonical.Value
             })
             .ToListAsync(ct);
 

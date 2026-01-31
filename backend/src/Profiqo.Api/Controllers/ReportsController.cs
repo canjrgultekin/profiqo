@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Entities;
 
 namespace Profiqo.Api.Controllers;
 
@@ -31,11 +32,29 @@ public sealed class ReportsController : ControllerBase
         var now = DateTimeOffset.UtcNow;
         var since30 = now.AddDays(-30);
 
-        var totalCustomers = await _db.Customers.AsNoTracking()
-            .CountAsync(x => x.TenantId == tenantId.Value, ct);
+        var links = _db.Set<CustomerMergeLink>().AsNoTracking()
+            .Where(x => x.TenantId == tenantId.Value);
 
-        var activeCustomers30 = await _db.Customers.AsNoTracking()
-            .CountAsync(x => x.TenantId == tenantId.Value && x.LastSeenAtUtc >= since30, ct);
+        var customerCanonicals =
+            from c in _db.Customers.AsNoTracking()
+            where c.TenantId == tenantId.Value
+            join ml in links on c.Id equals ml.SourceCustomerId into mlj
+            from ml in mlj.DefaultIfEmpty()
+            select new
+            {
+                canonicalCustomerId = ml != null ? ml.CanonicalCustomerId : c.Id,
+                c.LastSeenAtUtc
+            };
+
+        var totalCustomers = await customerCanonicals
+            .Select(x => x.canonicalCustomerId)
+            .Distinct()
+            .CountAsync(ct);
+
+        var activeCustomers30 = await customerCanonicals
+            .GroupBy(x => x.canonicalCustomerId)
+            .Select(g => new { lastSeenAtUtc = g.Max(x => x.LastSeenAtUtc) })
+            .CountAsync(x => x.lastSeenAtUtc >= since30, ct);
 
         var totalOrders30 = await _db.Orders.AsNoTracking()
             .CountAsync(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since30, ct);
@@ -50,7 +69,6 @@ public sealed class ReportsController : ControllerBase
             .Select(x => x.NetProfit.Amount)
             .SumAsync(ct);
 
-        // currency assumption: TRY for now (later multi-currency aggregation)
         return Ok(new
         {
             windowDays = 30,
