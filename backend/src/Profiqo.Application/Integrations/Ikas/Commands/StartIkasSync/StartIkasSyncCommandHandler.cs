@@ -13,18 +13,29 @@ namespace Profiqo.Application.Integrations.Ikas.Commands.StartIkasSync;
 
 internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyncCommand, StartIkasSyncResult>
 {
+    // Cursor keys (IkasSyncProcessor ile aynı)
+    private const string CustomerCursorKey = "ikas.customers.cursor.updatedAtMs";
+    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs";
+    private const string AbandonedCursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
+
+    private const int DefaultMaxPagesInitial = 200;
+    private const int DefaultMaxPagesSubsequent = 20;
+
     private readonly ITenantContext _tenant;
     private readonly IProviderConnectionRepository _connections;
     private readonly IIntegrationJobRepository _jobs;
+    private readonly IIntegrationCursorRepository _cursors;
 
     public StartIkasSyncCommandHandler(
         ITenantContext tenant,
         IProviderConnectionRepository connections,
-        IIntegrationJobRepository jobs)
+        IIntegrationJobRepository jobs,
+        IIntegrationCursorRepository cursors)
     {
         _tenant = tenant;
         _connections = connections;
         _jobs = jobs;
+        _cursors = cursors;
     }
 
     public async Task<StartIkasSyncResult> Handle(StartIkasSyncCommand request, CancellationToken ct)
@@ -38,9 +49,44 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
             throw new NotFoundException("Ikas connection not found.");
 
         var pageSize = request.PageSize is null or < 1 or > 200 ? 50 : request.PageSize.Value;
-        var maxPages = request.MaxPages is null or < 1 or > 500 ? 20 : request.MaxPages.Value;
 
-        // Normalize scope string
+        int maxPages;
+        if (request.MaxPages is not null && request.MaxPages.Value is >= 1 and <= 500)
+        {
+            maxPages = request.MaxPages.Value;
+        }
+        else
+        {
+            var connId = new ProviderConnectionId(request.ConnectionId);
+
+            var scopeRaw = (request.Scope ?? "both").Trim().ToLowerInvariant();
+            var wantsCustomers = scopeRaw is "customers" or "both";
+            var wantsOrders = scopeRaw is "orders" or "both";
+            var wantsAbandoned = scopeRaw is "abandoned" or "both";
+
+            var isInitial = false;
+
+            if (wantsCustomers)
+            {
+                var c = await _cursors.GetAsync(tenantId.Value, connId, CustomerCursorKey, ct);
+                if (!long.TryParse(c, out var ms) || ms <= 0) isInitial = true;
+            }
+
+            if (!isInitial && wantsOrders)
+            {
+                var c = await _cursors.GetAsync(tenantId.Value, connId, OrderCursorKey, ct);
+                if (!long.TryParse(c, out var ms) || ms <= 0) isInitial = true;
+            }
+
+            if (!isInitial && wantsAbandoned)
+            {
+                var c = await _cursors.GetAsync(tenantId.Value, connId, AbandonedCursorKey, ct);
+                if (!long.TryParse(c, out var ms) || ms <= 0) isInitial = true;
+            }
+
+            maxPages = isInitial ? DefaultMaxPagesInitial : DefaultMaxPagesSubsequent;
+        }
+
         var scope = (request.Scope ?? "both").Trim().ToLowerInvariant();
 
         var batchId = Guid.NewGuid();
@@ -85,7 +131,6 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
             created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncAbandonedCheckouts)));
         }
 
-        // Safety: unknown scope => default both
         if (created.Count == 0)
         {
             var jobId1 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(

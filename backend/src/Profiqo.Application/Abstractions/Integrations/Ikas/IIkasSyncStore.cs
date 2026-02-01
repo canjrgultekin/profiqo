@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Application/Abstractions/Integrations/Ikas/IIkasSyncStore.cs
-using Profiqo.Domain.Common.Ids;
+﻿using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Application.Abstractions.Integrations.Ikas;
 
@@ -20,7 +19,11 @@ public sealed record IkasOrderLineUpsert(
     decimal FinalPrice,
     string CurrencyCode,
     string? ProviderVariantId,
-    string? ProviderProductId);
+    string? ProviderProductId,
+    string? ProductCategory,
+    string? Barcode,
+    decimal Discount,
+    string? OrderLineItemStatusName);
 
 public sealed record IkasOrderUpsert(
     string ProviderOrderId,
@@ -28,6 +31,7 @@ public sealed record IkasOrderUpsert(
     long UpdatedAtMs,
     string CurrencyCode,
     decimal TotalFinalPrice,
+    string? OrderStatus, // ✅ NEW: Ikas order status string
     string? CustomerEmailNormalized,
     string? CustomerEmailHashSha256,
     string? CustomerPhoneNormalized,
@@ -49,8 +53,6 @@ public sealed record IkasAbandonedCheckoutUpsert(
 public interface IIkasSyncStore
 {
     Task<CustomerId> UpsertCustomerAsync(TenantId tenantId, IkasCustomerUpsert model, CancellationToken ct);
-
     Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct);
-
     Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct);
 }

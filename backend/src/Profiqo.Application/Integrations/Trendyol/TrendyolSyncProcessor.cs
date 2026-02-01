@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/TrendyolSyncProcessor.cs
-using System.Text.Json;
+﻿using System.Text.Json;
 
 using Microsoft.Extensions.Options;
 
@@ -11,7 +10,6 @@ using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Integrations;
 
 namespace Profiqo.Application.Integrations.Trendyol;
-
 
 public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 {
@@ -61,6 +59,9 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         var startMsDefault = DateTimeOffset.UtcNow.AddDays(-_opts.BackfillDays).ToUnixTimeMilliseconds();
         var startMs = cursorMs ?? startMsDefault;
 
+        // Cursor çok eskiyse Trendyol API 3 ay sınırından dolayı clamp
+        if (startMs < startMsDefault) startMs = startMsDefault;
+
         var safeSize = pageSize <= 0 ? _opts.DefaultPageSize : Math.Min(pageSize, _opts.PageSizeMax);
         var safeMaxPages = maxPages <= 0 ? _opts.DefaultMaxPages : maxPages;
 
@@ -101,6 +102,11 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                     ReadStringOrNumber(o, "orderNumber") ??
                     shipmentPackageId;
 
+                var orderStatus =
+                    ReadString(o, "status") ??
+                    ReadString(o, "shipmentPackageStatus") ??
+                    ReadString(o, "shipmentPackageStatusName");
+
                 var orderDateMs = ReadInt64(o, "orderDate") ?? startMs;
                 if (orderDateMs > maxSeenOrderDate) maxSeenOrderDate = orderDateMs;
 
@@ -113,7 +119,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 var firstName = ReadString(o, "customerFirstName");
                 var lastName = ReadString(o, "customerLastName");
 
-                // Trendyol shipmentAddress.phone often null, keep from shipmentAddress if exists
                 string? phone = null;
                 TrendyolAddressDto? shipAddr = null;
                 if (o.TryGetProperty("shipmentAddress", out var ship) && ship.ValueKind == JsonValueKind.Object)
@@ -131,10 +136,12 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 {
                     foreach (var l in li.EnumerateArray())
                     {
+                        var barcode = ReadString(l, "barcode");
+
                         var sku =
                             ReadString(l, "merchantSku") ??
                             ReadString(l, "sku") ??
-                            ReadString(l, "barcode") ??
+                            barcode ??
                             ReadString(l, "stockCode") ??
                             "NA";
 
@@ -144,7 +151,27 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                         var unit = ReadDecimal(l, "lineUnitPrice") ?? ReadDecimal(l, "price") ?? 0m;
                         var lineCurrency = ReadString(l, "currencyCode") ?? currency;
 
-                        lines.Add(new TrendyolOrderLineUpsert(sku, productName, qty, unit, lineCurrency));
+                        var productCategoryId =
+                            ReadStringOrNumber(l, "productCategoryId") ??
+                            ReadStringOrNumber(l, "productCategory");
+
+                        var discount = ReadDecimal(l, "discount") ?? 0m;
+
+                        var lineStatusName =
+                            ReadString(l, "orderLineItemStatusName") ??
+                            ReadString(l, "orderLineItemStatus") ??
+                            ReadString(l, "status");
+
+                        lines.Add(new TrendyolOrderLineUpsert(
+                            Sku: sku,
+                            ProductName: productName,
+                            Quantity: qty,
+                            UnitPrice: unit,
+                            CurrencyCode: lineCurrency,
+                            ProductCategoryId: productCategoryId,
+                            Barcode: barcode,
+                            Discount: discount,
+                            OrderLineItemStatusName: lineStatusName));
                     }
                 }
 
@@ -154,6 +181,7 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                     OrderDateUtc: orderDateUtc,
                     CurrencyCode: currency,
                     TotalPrice: totalPrice,
+                    OrderStatus: orderStatus,
                     CustomerEmail: email,
                     CustomerPhone: phone,
                     CustomerFirstName: firstName,
@@ -176,7 +204,8 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 break;
         }
 
-        var nextCursor = maxSeenOrderDate > 0 ? (maxSeenOrderDate + 1) : (endMs + 1);
+        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama upsert idempotent olduğu için veri kaçırmayız.
+        var nextCursor = maxSeenOrderDate > 0 ? maxSeenOrderDate : endMs;
         await _cursors.UpsertAsync(tenantId, connId, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;

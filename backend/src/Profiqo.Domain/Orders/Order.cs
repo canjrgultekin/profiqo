@@ -15,6 +15,9 @@ public sealed class Order : AggregateRoot<OrderId>
     public SalesChannel Channel { get; private set; }
     public string? ProviderOrderId { get; private set; }
 
+    // ✅ NEW: provider'dan gelen string status (trendyol/ikas)
+    public string? ProviderOrderStatus { get; private set; }
+
     public OrderStatus Status { get; private set; }
 
     public DateTimeOffset PlacedAtUtc { get; private set; }
@@ -36,9 +39,10 @@ public sealed class Order : AggregateRoot<OrderId>
     {
         TenantId = default;
         CustomerId = default;
-        TotalAmount = default;
+        TotalAmount = Money.Zero(CurrencyCode.TRY);
         PlacedAtUtc = default;
-        NetProfit = default;
+        NetProfit = Money.Zero(CurrencyCode.TRY);
+        ProviderOrderStatus = null;
     }
 
     private Order(
@@ -59,6 +63,8 @@ public sealed class Order : AggregateRoot<OrderId>
         ProviderOrderId = providerOrderId is null
             ? null
             : Guard.AgainstTooLong(Guard.AgainstNullOrWhiteSpace(providerOrderId, nameof(providerOrderId)), 200, nameof(providerOrderId));
+
+        ProviderOrderStatus = null;
 
         PlacedAtUtc = Guard.EnsureUtc(placedAtUtc, nameof(placedAtUtc));
         _lines.AddRange(Guard.AgainstNullOrEmpty(lines, nameof(lines)));
@@ -85,6 +91,15 @@ public sealed class Order : AggregateRoot<OrderId>
         Money totalAmount,
         DateTimeOffset nowUtc)
         => new(OrderId.New(), tenantId, customerId, channel, providerOrderId, placedAtUtc, lines, totalAmount, nowUtc);
+
+    public void SetProviderOrderStatus(string? providerStatus, DateTimeOffset nowUtc)
+    {
+        ProviderOrderStatus = string.IsNullOrWhiteSpace(providerStatus)
+            ? null
+            : Guard.AgainstTooLong(providerStatus.Trim(), 120, nameof(providerStatus));
+
+        Touch(nowUtc);
+    }
 
     public void UpdateStatus(OrderStatus status, DateTimeOffset nowUtc)
     {

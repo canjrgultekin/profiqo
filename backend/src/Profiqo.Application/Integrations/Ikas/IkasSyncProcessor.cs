@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using Microsoft.AspNetCore.Http;
+
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Abstractions.Persistence;
@@ -22,10 +24,12 @@ public interface IIkasSyncProcessor
 
 public sealed class IkasSyncProcessor : IIkasSyncProcessor
 {
-    private const int InitialBackfillDays = 30;
+    // İlk entegrasyonda (cursor yokken) Ikas tarafında alabildiğimiz kadar geçmişe dönük veri çekiyoruz.
+    // Sonraki sync'lerde cursor ile incremental çalışır.
+    private const long InitialCutoffMs = 0;
 
     private const string CustomerCursorKey = "ikas.customers.cursor.updatedAtMs";
-    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs"; // ✅ updatedAt üzerinden cursor
+    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs"; // updatedAt üzerinden cursor
 
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
@@ -60,7 +64,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         var token = _secrets.Unprotect(conn.AccessToken);
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-InitialBackfillDays).ToUnixTimeMilliseconds();
+        var initialCutoffMs = InitialCutoffMs;
 
         var cursorMs = await GetCursorMsOrNull(tenantId, connId, CustomerCursorKey, ct);
         var stopBeforeMs = cursorMs ?? initialCutoffMs;
@@ -126,7 +130,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 break;
         }
 
-        var nextCursor = maxSeenUpdatedAt > 0 ? (maxSeenUpdatedAt + 1) : (nowMs + 1);
+        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama upsert idempotent olduğu için veri kaçırmayız.
+        var nextCursor = maxSeenUpdatedAt > 0 ? maxSeenUpdatedAt : nowMs;
         await _cursors.UpsertAsync(tenantId, connId, CustomerCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;
@@ -142,11 +147,11 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         var token = _secrets.Unprotect(conn.AccessToken);
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-InitialBackfillDays).ToUnixTimeMilliseconds();
+        var initialCutoffMs = InitialCutoffMs;
 
         var cursorMs = await GetCursorMsOrNull(tenantId, connId, OrderCursorKey, ct);
 
-        // ✅ Server-side updatedAt filter bazen boş döndürme riskli.
+        // Server-side updatedAt filter bazen boş döndürme riskli.
         // Bu yüzden server-side updatedAt filter'ı sadece cursor varsa kullanıyoruz.
         var updatedAtGteMs = cursorMs;
 
@@ -175,7 +180,6 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
                 var updatedAtMs = ReadInt64(o, "updatedAt") ?? 0L;
 
-                // sort -orderedAt olduğundan kesin değil ama yine de cutoff altına düştüyse stop edebiliriz
                 if (updatedAtMs > 0 && updatedAtMs < stopBeforeMs)
                 {
                     stopAll = true;
@@ -194,6 +198,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
                 var totalFinal = ReadDecimal(o, "totalFinalPrice") ?? ReadDecimal(o, "totalPrice") ?? 0m;
+                var orderStatus = ReadString(o, "status");
 
                 string? emailNorm = null, emailHash = null, phoneNorm = null, phoneHash = null;
 
@@ -221,10 +226,16 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                         var unitPrice = ReadDecimal(li, "price") ?? 0m;
                         var finalPrice = ReadDecimal(li, "finalPrice") ?? unitPrice;
 
+                        var lineStatus = ReadString(li, "status");
+                        var discount = ReadDecimal(li, "discountPrice") ?? 0m;
+
                         string? sku = null;
                         string productName = "unknown";
                         string? variantId = null;
                         string? productId = null;
+
+                        string? productCategory = null; // Ikas: category name
+                        string? barcode = null;         // Ikas: barcodeList[0]
 
                         if (li.TryGetProperty("variant", out var v) && v.ValueKind == JsonValueKind.Object)
                         {
@@ -232,6 +243,20 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                             productId = ReadString(v, "productId");
                             sku = ReadString(v, "sku");
                             productName = ReadString(v, "name") ?? productName;
+
+                            if (v.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array && cats.GetArrayLength() > 0)
+                            {
+                                var c0 = cats[0];
+                                if (c0.ValueKind == JsonValueKind.Object)
+                                    productCategory = ReadString(c0, "name");
+                            }
+
+                            if (v.TryGetProperty("barcodeList", out var bl) && bl.ValueKind == JsonValueKind.Array && bl.GetArrayLength() > 0)
+                            {
+                                var b0 = bl[0];
+                                if (b0.ValueKind == JsonValueKind.String)
+                                    barcode = b0.GetString();
+                            }
                         }
 
                         lines.Add(new IkasOrderLineUpsert(
@@ -242,14 +267,21 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                             FinalPrice: finalPrice,
                             CurrencyCode: lineCurrency,
                             ProviderVariantId: variantId,
-                            ProviderProductId: productId));
+                            ProviderProductId: productId,
+                            ProductCategory: productCategory,
+                            Barcode: barcode,
+                            Discount: discount,
+                            OrderLineItemStatusName: lineStatus));
                     }
                 }
 
-                // ✅ NEW: shippingAddress raw json
+
                 string? shippingJson = null;
                 if (o.TryGetProperty("shippingAddress", out var ship) && ship.ValueKind == JsonValueKind.Object)
                     shippingJson = ship.GetRawText();
+                string? billingJson = null;
+                if (o.TryGetProperty("billingAddress", out var bill) && bill.ValueKind == JsonValueKind.Object)
+                    billingJson = bill.GetRawText();
 
                 var model = new IkasOrderUpsert(
                     ProviderOrderId: providerOrderId!,
@@ -257,13 +289,14 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     UpdatedAtMs: updatedAtMs,
                     CurrencyCode: currency,
                     TotalFinalPrice: totalFinal,
+                    OrderStatus: orderStatus,
                     CustomerEmailNormalized: emailNorm,
                     CustomerEmailHashSha256: emailHash,
                     CustomerPhoneNormalized: phoneNorm,
                     CustomerPhoneHashSha256: phoneHash,
                     Lines: lines,
                     ShippingAddressJson: shippingJson,
-                    BillingAddressJson: null);
+                    BillingAddressJson: billingJson);
 
                 await _store.UpsertOrderAsync(tenantId, model, ct);
                 processed++;
@@ -276,7 +309,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 break;
         }
 
-        var nextCursor = maxSeenUpdatedAt > 0 ? (maxSeenUpdatedAt + 1) : (nowMs + 1);
+        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama order upsert providerOrderId ile idempotent.
+        var nextCursor = maxSeenUpdatedAt > 0 ? maxSeenUpdatedAt : nowMs;
         await _cursors.UpsertAsync(tenantId, connId, OrderCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;

@@ -142,20 +142,83 @@ query listOrder(
         updatedAt
         status
         deleted
-        variant { id name sku productId slug }
+        variant {
+          id
+          name
+          sku
+          productId
+          slug
+          brand {
+            name
+          }
+          categories {
+            name
+          }
+          barcodeList
+          hsCode
+        }
+        discountPrice
       }
-
       shippingAddress {
         addressLine1
         addressLine2
-        city { name code }
-        country { name code }
-        district { name code }
+        city {
+          name
+          code
+        }
+        country {
+          name
+          code
+        }
+        district {
+          name
+          code
+        }
         identityNumber
         phone
         postalCode
-        region { name }
-        state { name code }
+        region {
+          name
+        }
+        state {
+          name
+          code
+        }
+        taxNumber
+        taxOffice
+        company
+        firstName
+        lastName
+      }
+      couponCode
+      billingAddress {
+        addressLine1
+        addressLine2
+        city {
+          code
+          name
+        }
+        company
+        country {
+          code
+          name
+        }
+        district {
+          code
+          name
+        }
+        firstName
+        lastName
+        phone
+        identityNumber
+        postalCode
+        region {
+          name
+        }
+        state {
+          code
+          name
+        }
         taxNumber
         taxOffice
       }
@@ -166,7 +229,7 @@ query listOrder(
             {
                 pagination = new { page, limit },
                 search = (string?)null,
-                sort = "-orderedAt",
+                sort = "-updatedAt",
                 status = new
                 {
                     @in = new[]

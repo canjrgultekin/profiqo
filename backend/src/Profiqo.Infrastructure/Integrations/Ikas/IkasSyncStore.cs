@@ -1,4 +1,7 @@
 ﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Ikas/IkasSyncStore.cs
+using System.Security.Cryptography;
+using System.Text;
+
 using Microsoft.EntityFrameworkCore;
 
 using Profiqo.Application.Abstractions.Integrations.Ikas;
@@ -31,10 +34,34 @@ public sealed class IkasSyncStore : IIkasSyncStore
         var ids = new List<IdentityInput>();
 
         if (!string.IsNullOrWhiteSpace(model.EmailNormalized) && !string.IsNullOrWhiteSpace(model.EmailHashSha256))
-            ids.Add(new IdentityInput(IdentityType.Email, model.EmailNormalized, new IdentityHash(model.EmailHashSha256), ProviderType.Ikas, model.ProviderCustomerId));
+            ids.Add(new IdentityInput(
+                IdentityType.Email,
+                model.EmailNormalized,
+                new IdentityHash(model.EmailHashSha256),
+                ProviderType.Ikas,
+                model.ProviderCustomerId));
 
         if (!string.IsNullOrWhiteSpace(model.PhoneNormalized) && !string.IsNullOrWhiteSpace(model.PhoneHashSha256))
-            ids.Add(new IdentityInput(IdentityType.Phone, model.PhoneNormalized, new IdentityHash(model.PhoneHashSha256), ProviderType.Ikas, model.ProviderCustomerId));
+            ids.Add(new IdentityInput(
+                IdentityType.Phone,
+                model.PhoneNormalized,
+                new IdentityHash(model.PhoneHashSha256),
+                ProviderType.Ikas,
+                model.ProviderCustomerId));
+
+        // ProviderCustomerId identity (match order doesn't use it, ama provider map ve audit için faydalı)
+        if (!string.IsNullOrWhiteSpace(model.ProviderCustomerId))
+        {
+            var pid = model.ProviderCustomerId.Trim();
+            // type=ProviderCustomerId tenant içinde unique, collision olmasın diye provider prefix ekliyoruz
+            var hash = Sha256Hex($"ikas:{pid}");
+            ids.Add(new IdentityInput(
+                IdentityType.ProviderCustomerId,
+                pid,
+                new IdentityHash(hash),
+                ProviderType.Ikas,
+                pid));
+        }
 
         var customerId = await _resolver.ResolveOrCreateCustomerAsync(
             tenantId,
@@ -50,35 +77,61 @@ public sealed class IkasSyncStore : IIkasSyncStore
 
     public async Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct)
     {
-        var exists = await _db.Orders.AsNoTracking()
-            .AnyAsync(o => o.TenantId == tenantId && o.Channel == SalesChannel.Ikas && o.ProviderOrderId == model.ProviderOrderId, ct);
-
-        if (exists)
-        {
-            var id = await _db.Orders.AsNoTracking()
-                .Where(o => o.TenantId == tenantId && o.Channel == SalesChannel.Ikas && o.ProviderOrderId == model.ProviderOrderId)
-                .Select(o => o.Id)
-                .FirstAsync(ct);
-            return id;
-        }
-
         var now = DateTimeOffset.UtcNow;
 
+        // 1) Customer resolve (email/phone varsa canonical'a gider, yoksa yeni customer create eder)
         var ids = new List<IdentityInput>();
 
         if (!string.IsNullOrWhiteSpace(model.CustomerEmailNormalized) && !string.IsNullOrWhiteSpace(model.CustomerEmailHashSha256))
-            ids.Add(new IdentityInput(IdentityType.Email, model.CustomerEmailNormalized, new IdentityHash(model.CustomerEmailHashSha256), ProviderType.Ikas, model.ProviderOrderId));
+            ids.Add(new IdentityInput(
+                IdentityType.Email,
+                model.CustomerEmailNormalized,
+                new IdentityHash(model.CustomerEmailHashSha256),
+                ProviderType.Ikas,
+                model.ProviderOrderId));
 
         if (!string.IsNullOrWhiteSpace(model.CustomerPhoneNormalized) && !string.IsNullOrWhiteSpace(model.CustomerPhoneHashSha256))
-            ids.Add(new IdentityInput(IdentityType.Phone, model.CustomerPhoneNormalized, new IdentityHash(model.CustomerPhoneHashSha256), ProviderType.Ikas, model.ProviderOrderId));
+            ids.Add(new IdentityInput(
+                IdentityType.Phone,
+                model.CustomerPhoneNormalized,
+                new IdentityHash(model.CustomerPhoneHashSha256),
+                ProviderType.Ikas,
+                model.ProviderOrderId));
 
-        var customerId = ids.Count > 0
-            ? await _resolver.ResolveOrCreateCustomerAsync(tenantId, null, null, ids, now, ct)
-            : CustomerId.New();
+        var customerId = await _resolver.ResolveOrCreateCustomerAsync(
+            tenantId,
+            firstName: null,
+            lastName: null,
+            identities: ids,
+            nowUtc: now,
+            ct: ct);
 
         var currency = new CurrencyCode(model.CurrencyCode);
 
-        // ✅ FIX: OrderLine ctor unitPrice ister. Biz unitPrice olarak finalPrice’ı basıyoruz.
+        // 2) Order already exists? -> idempotent, ama provider status + address snapshot güncellenir
+        var existing = await _db.Orders
+            .FirstOrDefaultAsync(o =>
+                o.TenantId == tenantId &&
+                o.Channel == SalesChannel.Ikas &&
+                o.ProviderOrderId == model.ProviderOrderId, ct);
+
+        if (existing is not null)
+        {
+            // provider status update
+            existing.SetProviderOrderStatus(model.OrderStatus, now);
+
+            // address snapshots update
+            _db.Entry(existing).Property("ShippingAddressJson").CurrentValue =
+                string.IsNullOrWhiteSpace(model.ShippingAddressJson) ? null : model.ShippingAddressJson;
+
+            _db.Entry(existing).Property("BillingAddressJson").CurrentValue =
+                string.IsNullOrWhiteSpace(model.BillingAddressJson) ? null : model.BillingAddressJson;
+
+            await _db.SaveChangesAsync(ct);
+            return existing.Id;
+        }
+
+        // 3) Build lines with new fields (productCategory, barcode, discount, line status)
         var lines = new List<OrderLine>();
 
         if (model.Lines is not null && model.Lines.Count > 0)
@@ -87,16 +140,41 @@ public sealed class IkasSyncStore : IIkasSyncStore
             {
                 var lineCurrency = new CurrencyCode(l.CurrencyCode);
 
-                var sku = string.IsNullOrWhiteSpace(l.Sku) ? (l.ProviderVariantId ?? l.ProviderProductId ?? "unknown") : l.Sku!;
-                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName;
+                var sku = string.IsNullOrWhiteSpace(l.Sku)
+                    ? (l.ProviderVariantId ?? l.ProviderProductId ?? "unknown")
+                    : l.Sku!.Trim();
 
+                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
+
+                // unitPrice olarak finalPrice basıyoruz (line total unitPrice*qty)
                 var unitPriceMoney = new Money(l.FinalPrice, lineCurrency);
-                lines.Add(new OrderLine(sku, name, l.Quantity, unitPriceMoney));
+
+                var discountMoney = new Money(l.Discount, lineCurrency);
+
+                lines.Add(new OrderLine(
+                    sku: sku,
+                    productName: name,
+                    quantity: l.Quantity <= 0 ? 1 : l.Quantity,
+                    unitPrice: unitPriceMoney,
+                    productCategory: string.IsNullOrWhiteSpace(l.ProductCategory) ? null : l.ProductCategory.Trim(),
+                    barcode: string.IsNullOrWhiteSpace(l.Barcode) ? null : l.Barcode.Trim(),
+                    discount: discountMoney,
+                    orderLineItemStatusName: string.IsNullOrWhiteSpace(l.OrderLineItemStatusName) ? null : l.OrderLineItemStatusName.Trim()
+                ));
             }
         }
         else
         {
-            lines.Add(new OrderLine("ikas", "ikas order", 1, new Money(model.TotalFinalPrice, currency)));
+            lines.Add(new OrderLine(
+                sku: "ikas",
+                productName: "ikas order",
+                quantity: 1,
+                unitPrice: new Money(model.TotalFinalPrice, currency),
+                productCategory: null,
+                barcode: null,
+                discount: Money.Zero(currency),
+                orderLineItemStatusName: null
+            ));
         }
 
         var total = new Money(model.TotalFinalPrice, currency);
@@ -111,9 +189,12 @@ public sealed class IkasSyncStore : IIkasSyncStore
             totalAmount: total,
             nowUtc: now);
 
+        // ✅ provider order status
+        order.SetProviderOrderStatus(model.OrderStatus, now);
+
         await _db.Orders.AddAsync(order, ct);
 
-        // ✅ NEW: shadow json columns
+        // ✅ shadow json columns
         _db.Entry(order).Property("ShippingAddressJson").CurrentValue =
             string.IsNullOrWhiteSpace(model.ShippingAddressJson) ? null : model.ShippingAddressJson;
 
@@ -195,5 +276,13 @@ public sealed class IkasSyncStore : IIkasSyncStore
         }
 
         await _db.SaveChangesAsync(ct);
+    }
+
+    private static string Sha256Hex(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        var sb = new StringBuilder(bytes.Length * 2);
+        foreach (var b in bytes) sb.Append(b.ToString("x2"));
+        return sb.ToString();
     }
 }

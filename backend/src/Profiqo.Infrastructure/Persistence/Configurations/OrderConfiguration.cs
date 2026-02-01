@@ -36,6 +36,11 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.Property(x => x.ProviderOrderId).HasMaxLength(200);
 
+        // ✅ NEW: provider order status (string)
+        builder.Property(x => x.ProviderOrderStatus)
+            .HasColumnName("provider_order_status")
+            .HasMaxLength(120);
+
         builder.HasIndex(x => new { x.TenantId, x.Channel, x.ProviderOrderId }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.CustomerId, x.PlacedAtUtc });
 
@@ -44,7 +49,6 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.Ignore(x => x.CostBreakdown);
 
-        // TotalAmount
         builder.OwnsOne(x => x.TotalAmount, m =>
         {
             m.Property(p => p.Amount)
@@ -59,7 +63,6 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
                 .IsRequired();
         });
 
-        // NetProfit
         builder.OwnsOne(x => x.NetProfit, m =>
         {
             m.Property(p => p.Amount)
@@ -79,7 +82,6 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasColumnType("jsonb")
             .IsRequired();
 
-        // ✅ Address snapshots (shadow properties)
         builder.Property<string?>("ShippingAddressJson")
             .HasColumnName("shipping_address_json")
             .HasColumnType("jsonb");
@@ -88,13 +90,11 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasColumnName("billing_address_json")
             .HasColumnType("jsonb");
 
-        // OrderLines - FK tipi düzeltildi
         builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
         builder.OwnsMany(x => x.Lines, l =>
         {
             l.ToTable("order_lines");
 
-            // FK'yı doğru tip ve converter ile tanımla
             l.Property<OrderId>("OrderId")
                 .HasConversion(new StronglyTypedIdConverter<OrderId>())
                 .HasColumnName("order_id")
@@ -110,6 +110,12 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
             l.Property(p => p.Sku).HasMaxLength(128).HasColumnName("sku").IsRequired();
             l.Property(p => p.ProductName).HasMaxLength(300).HasColumnName("product_name").IsRequired();
+
+            // ✅ NEW columns
+            l.Property(p => p.ProductCategory).HasMaxLength(200).HasColumnName("product_category");
+            l.Property(p => p.Barcode).HasMaxLength(128).HasColumnName("barcode");
+            l.Property(p => p.OrderLineItemStatusName).HasMaxLength(120).HasColumnName("order_line_item_status_name");
+
             l.Property(p => p.Quantity).HasColumnName("quantity").IsRequired();
 
             l.OwnsOne(p => p.UnitPrice, mp =>
@@ -121,6 +127,21 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
                 mp.Property(x => x.Currency)
                     .HasColumnName("unit_currency")
+                    .HasMaxLength(3)
+                    .HasConversion(CurrencyConverter)
+                    .IsRequired();
+            });
+
+            // ✅ NEW: Discount money
+            l.OwnsOne(p => p.Discount, mp =>
+            {
+                mp.Property(x => x.Amount)
+                    .HasColumnName("discount_amount")
+                    .HasColumnType("numeric(19,4)")
+                    .IsRequired();
+
+                mp.Property(x => x.Currency)
+                    .HasColumnName("discount_currency")
                     .HasMaxLength(3)
                     .HasConversion(CurrencyConverter)
                     .IsRequired();

@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Trendyol/TrendyolSyncStore.cs
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -28,7 +27,6 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
     {
         var now = DateTimeOffset.UtcNow;
 
-        // Resolve/Create Customer
         var emailNorm = NormalizeEmail(model.CustomerEmail);
         var phoneNorm = NormalizePhone(model.CustomerPhone);
 
@@ -46,48 +44,6 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
 
         var channel = SalesChannel.Trendyol;
 
-        var exists = await _db.Orders.AsNoTracking().AnyAsync(x =>
-            x.TenantId == tenantId &&
-            x.Channel == channel &&
-            x.ProviderOrderId == providerOrderId, ct);
-
-        if (exists)
-            return;
-
-        var currency = NormalizeCurrency(model.CurrencyCode);
-        var totalAmount = new Money(model.TotalPrice, new CurrencyCode(currency));
-
-        var lines = (model.Lines ?? Array.Empty<TrendyolOrderLineUpsert>())
-            .Select(l =>
-            {
-                var lc = NormalizeCurrency(l.CurrencyCode);
-                var qty = l.Quantity <= 0 ? 1 : l.Quantity;
-
-                var unitMoney = new Money(l.UnitPrice, new CurrencyCode(lc));
-
-                var sku = string.IsNullOrWhiteSpace(l.Sku) ? "NA" : l.Sku.Trim();
-                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
-
-                return new OrderLine(sku, name, qty, unitMoney);
-            })
-            .ToList();
-
-        if (lines.Count == 0)
-            lines.Add(new OrderLine("NA", "unknown", 1, Money.Zero(new CurrencyCode(currency))));
-
-        var created = Order.Create(
-            tenantId: tenantId,
-            customerId: customer.Id,
-            channel: channel,
-            providerOrderId: providerOrderId,
-            placedAtUtc: model.OrderDateUtc,
-            lines: lines,
-            totalAmount: totalAmount,
-            nowUtc: now);
-
-        await _db.Orders.AddAsync(created, ct);
-
-        // ✅ NEW: set shadow address jsons
         var shipJson = JsonSerializer.Serialize(new
         {
             addressLine1 = model.ShippingAddress?.Address1,
@@ -115,6 +71,62 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
             phone = model.BillingAddress?.Phone,
             fullName = model.BillingAddress?.FullName
         });
+
+        // Eğer order daha önce kaydedildiyse, mükerrer yaratma; ama provider status ve adres snapshot güncellenebilir
+        var existing = await _db.Orders
+            .FirstOrDefaultAsync(x =>
+                x.TenantId == tenantId &&
+                x.Channel == channel &&
+                x.ProviderOrderId == providerOrderId, ct);
+
+        if (existing is not null)
+        {
+            existing.SetProviderOrderStatus(model.OrderStatus, now);
+            _db.Entry(existing).Property("ShippingAddressJson").CurrentValue = shipJson;
+            _db.Entry(existing).Property("BillingAddressJson").CurrentValue = billJson;
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        var currency = NormalizeCurrency(model.CurrencyCode);
+        var totalAmount = new Money(model.TotalPrice, new CurrencyCode(currency));
+
+        var lines = (model.Lines ?? Array.Empty<TrendyolOrderLineUpsert>())
+            .Select(l =>
+            {
+                var lc = NormalizeCurrency(l.CurrencyCode);
+                var qty = l.Quantity <= 0 ? 1 : l.Quantity;
+
+                var unitMoney = new Money(l.UnitPrice, new CurrencyCode(lc));
+                var discountMoney = new Money(l.Discount, new CurrencyCode(lc));
+
+                var sku = string.IsNullOrWhiteSpace(l.Sku) ? "NA" : l.Sku.Trim();
+                var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
+
+                var productCategory = string.IsNullOrWhiteSpace(l.ProductCategoryId) ? null : l.ProductCategoryId.Trim(); // Trendyol: ID
+                var barcode = string.IsNullOrWhiteSpace(l.Barcode) ? null : l.Barcode.Trim();
+                var statusName = string.IsNullOrWhiteSpace(l.OrderLineItemStatusName) ? null : l.OrderLineItemStatusName.Trim();
+
+                return new OrderLine(sku, name, qty, unitMoney, productCategory, barcode, discountMoney, statusName);
+            })
+            .ToList();
+
+        if (lines.Count == 0)
+            lines.Add(new OrderLine("NA", "unknown", 1, Money.Zero(new CurrencyCode(currency))));
+
+        var created = Order.Create(
+            tenantId: tenantId,
+            customerId: customer.Id,
+            channel: channel,
+            providerOrderId: providerOrderId,
+            placedAtUtc: model.OrderDateUtc,
+            lines: lines,
+            totalAmount: totalAmount,
+            nowUtc: now);
+
+        created.SetProviderOrderStatus(model.OrderStatus, now);
+
+        await _db.Orders.AddAsync(created, ct);
 
         _db.Entry(created).Property("ShippingAddressJson").CurrentValue = shipJson;
         _db.Entry(created).Property("BillingAddressJson").CurrentValue = billJson;

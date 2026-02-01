@@ -1,5 +1,4 @@
-﻿// Path: backend/src/Profiqo.Application/Abstractions/Integrations/Trendyol/ITrendyolSyncStore.cs
-using Profiqo.Domain.Common.Ids;
+﻿using Profiqo.Domain.Common.Ids;
 
 namespace Profiqo.Application.Abstractions.Integrations.Trendyol;
 
@@ -8,10 +7,12 @@ public sealed record TrendyolOrderLineUpsert(
     string ProductName,
     int Quantity,
     decimal UnitPrice,
-    string CurrencyCode);
+    string CurrencyCode,
+    string? ProductCategoryId,
+    string? Barcode,
+    decimal Discount,
+    string? OrderLineItemStatusName);
 
-// Path: backend/src/Profiqo.Application/Abstractions/Integrations/Trendyol/ITrendyolSyncStore.cs
-// Bu record’u dosyanın üstüne ekle:
 public sealed record TrendyolAddressDto(
     string? Address1,
     string? Address2,
@@ -24,13 +25,13 @@ public sealed record TrendyolAddressDto(
     string? Phone,
     string? FullName);
 
-// TrendyolOrderUpsert record’una şu iki alanı ekle:
 public sealed record TrendyolOrderUpsert(
     string ShipmentPackageId,
     string OrderNumber,
     DateTimeOffset OrderDateUtc,
     string CurrencyCode,
     decimal TotalPrice,
+    string? OrderStatus, // ✅ NEW: Trendyol order status string
     string? CustomerEmail,
     string? CustomerPhone,
     string? CustomerFirstName,
@@ -39,7 +40,6 @@ public sealed record TrendyolOrderUpsert(
     string PayloadJson,
     TrendyolAddressDto? ShippingAddress,
     TrendyolAddressDto? BillingAddress);
-
 
 public interface ITrendyolSyncStore
 {

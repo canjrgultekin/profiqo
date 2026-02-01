@@ -6,6 +6,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using Npgsql;
+
+using NpgsqlTypes;
+
 using Profiqo.Api.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Application.Customers.Dedupe;
@@ -291,7 +295,6 @@ public sealed class CustomerDedupeController : ControllerBase
 
         return await strategy.ExecuteAsync(async () =>
         {
-            // Suggestion'ı transaction dışında okumak istesen de olur ama biz tek retriable unit yapıyoruz
             var suggestion = await _db.Set<CustomerMergeSuggestion>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(x => x.TenantId == tenantId.Value.Value && x.GroupKey == groupKey, ct);
@@ -303,7 +306,6 @@ public sealed class CustomerDedupeController : ControllerBase
             if (group is null)
                 return (IActionResult)Problem("Suggestion payload could not be parsed.");
 
-            // Guid -> CustomerId
             var candidateIds = group.Candidates
                 .Select(c => new CustomerId(c.CustomerId))
                 .Distinct()
@@ -320,6 +322,9 @@ public sealed class CustomerDedupeController : ControllerBase
 
             var linkMap = existingLinks.ToDictionary(x => x.SourceCustomerId, x => x.CanonicalCustomerId);
 
+            // ✅ Canonical flip olmasın: daha önce canonical olmuş head’leri tercih et
+            var canonicalHeads = new HashSet<CustomerId>(existingLinks.Select(x => x.CanonicalCustomerId));
+
             CustomerId ResolveRoot(CustomerId id)
             {
                 var current = id;
@@ -329,6 +334,7 @@ public sealed class CustomerDedupeController : ControllerBase
                 {
                     if (!visited.Add(current))
                         break;
+
                     current = next;
                 }
 
@@ -348,7 +354,6 @@ public sealed class CustomerDedupeController : ControllerBase
                     allCustomerIds.Add(src);
             }
 
-            // ✅ EF translate fix: Contains on strong id
             var allTypedIds = allCustomerIds.ToList();
             var orderCounts = await _db.Orders.AsNoTracking()
                 .Where(o => o.TenantId == tenantId.Value && allTypedIds.Contains(o.CustomerId))
@@ -358,7 +363,6 @@ public sealed class CustomerDedupeController : ControllerBase
 
             var orderCountMap = orderCounts.ToDictionary(x => x.CustomerId, x => x.Cnt);
 
-            // ✅ EF translate fix: Contains on strong id
             var rootIds = roots.ToList();
             var customerMeta = await _db.Customers.AsNoTracking()
                 .Where(c => c.TenantId == tenantId.Value && rootIds.Contains(c.Id))
@@ -379,8 +383,10 @@ public sealed class CustomerDedupeController : ControllerBase
                 return sum;
             }
 
+            // ✅ önce canonical head’i koru, sonra orderCount vb.
             var canonical = roots
-                .OrderByDescending(GroupOrderCount)
+                .OrderByDescending(r => canonicalHeads.Contains(r))
+                .ThenByDescending(GroupOrderCount)
                 .ThenByDescending(r => metaMap.TryGetValue(r, out var m) ? m.LastSeenAtUtc : DateTimeOffset.MinValue)
                 .ThenBy(r => metaMap.TryGetValue(r, out var m) ? m.FirstSeenAtUtc : DateTimeOffset.MaxValue)
                 .ThenBy(r => r.Value)
@@ -407,13 +413,43 @@ public sealed class CustomerDedupeController : ControllerBase
             }
             else
             {
-                // Eğer MarkApproved(CustomerId ...) ise canonical.Value yerine canonical ver
+                // MarkApproved(CustomerId ...) ise canonical.Value yerine canonical ver
                 decision.MarkApproved(canonical.Value, suggestion.UpdatedAtUtc, nowUtc);
             }
 
             var toUpsert = allCustomerIds.Where(x => x != canonical).ToList();
 
-            // ✅ EF translate fix: Contains on strong id (SourceCustomerId)
+            // ✅ NEW: approve sonrası identity’leri canonical’a taşı (Ikas email/phone ile sonraki sync’ler canonical’a bağlansın)
+            if (toUpsert.Count > 0)
+            {
+                var tenantGuid = tenantId.Value.Value;
+                var canonicalGuid = canonical.Value;
+                var sourceGuids = toUpsert.Select(x => x.Value).ToArray();
+
+                var pTenant = new NpgsqlParameter<Guid>("tenantId", tenantGuid) { NpgsqlDbType = NpgsqlDbType.Uuid };
+                var pCanonical = new NpgsqlParameter<Guid>("canonicalId", canonicalGuid) { NpgsqlDbType = NpgsqlDbType.Uuid };
+                var pSources = new NpgsqlParameter<Guid[]>("sourceIds", sourceGuids) { NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Uuid };
+
+                // Eğer aynı identity canonical’da zaten varsa, update sırasında unique/PK patlamasın diye önce çakışanları sil
+                await _db.Database.ExecuteSqlRawAsync(@"
+DELETE FROM public.customer_identities si
+USING public.customer_identities ci
+WHERE si.tenant_id = @tenantId
+  AND ci.tenant_id = @tenantId
+  AND ci.customer_id = @canonicalId
+  AND si.customer_id = ANY(@sourceIds)
+  AND ci.type = si.type
+  AND ci.value_hash = si.value_hash
+", new object[] { pTenant, pCanonical, pSources }, ct);
+
+                await _db.Database.ExecuteSqlRawAsync(@"
+UPDATE public.customer_identities
+SET customer_id = @canonicalId
+WHERE tenant_id = @tenantId
+  AND customer_id = ANY(@sourceIds)
+", new object[] { pTenant, pCanonical, pSources }, ct);
+            }
+
             var existingTrackedLinks = await _db.Set<CustomerMergeLink>()
                 .Where(x => x.TenantId == tenantId.Value && toUpsert.Contains(x.SourceCustomerId))
                 .ToListAsync(ct);
@@ -508,7 +544,7 @@ public sealed class CustomerDedupeController : ControllerBase
         var typedIds = idList.Select(x => new CustomerId(x)).ToList();
 
         var identityProviders = await _db.Customers.AsNoTracking()
-            .Where(c => c.TenantId == tenantId && typedIds.Contains(c.Id)) // ✅ Contains on strong id
+            .Where(c => c.TenantId == tenantId && typedIds.Contains(c.Id))
             .SelectMany(c => c.Identities
                 .Where(i => i.Type == IdentityType.ProviderCustomerId && i.SourceProvider.HasValue)
                 .Select(i => new
@@ -531,7 +567,7 @@ public sealed class CustomerDedupeController : ControllerBase
         var missingTyped = missingGuids.Select(x => new CustomerId(x)).ToList();
 
         var orderProviders = await _db.Orders.AsNoTracking()
-            .Where(o => o.TenantId == tenantId && missingTyped.Contains(o.CustomerId)) // ✅ Contains on strong id
+            .Where(o => o.TenantId == tenantId && missingTyped.Contains(o.CustomerId))
             .Select(o => new
             {
                 CustomerId = o.CustomerId.Value,
