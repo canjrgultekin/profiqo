@@ -33,6 +33,7 @@ builder.Services.AddIdentityResolution();
 builder.Services.AddScoped<IIkasSyncProcessor, IkasSyncProcessor>();
 
 builder.Services.AddHostedService<IntegrationJobWorker>();
+builder.Services.AddHostedService<Profiqo.Worker.SyncAutomation.SyncAutomationSchedulerWorker>();
 
 var host = builder.Build();
 await host.RunAsync();

@@ -35,7 +35,14 @@ export const NAV_DATA = [
           { title: "Trendyol", url: "/integrations/trendyol" },
         ],
       },
-
+	  {
+		  title: "Automation",
+		  icon: Icons.Alphabet,
+		  items: [
+			{ title: "Sync Rules", url: "/automation/sync-rules" },
+			{ title: "Sync Runs", url: "/automation/sync-runs" },
+		  ],
+	  },
       {
         title: "Settings",
         icon: Icons.Alphabet,
