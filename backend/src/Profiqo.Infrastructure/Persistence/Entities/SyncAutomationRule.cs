@@ -1,4 +1,6 @@
-﻿namespace Profiqo.Infrastructure.Persistence.Entities;
+﻿using System.Text.Json;
+
+namespace Profiqo.Infrastructure.Persistence.Entities;
 
 public sealed class SyncAutomationRule
 {
@@ -12,6 +14,10 @@ public sealed class SyncAutomationRule
     public int PageSize { get; private set; }
     public int MaxPages { get; private set; }
 
+    // ✅ NEW
+    public string JobKindsJson { get; private set; } = "[]";  // jsonb string
+    public int JitterMinutes { get; private set; }            // 0..10
+
     public DateTimeOffset NextRunAtUtc { get; private set; }
     public DateTimeOffset? LastEnqueuedAtUtc { get; private set; }
 
@@ -23,7 +29,18 @@ public sealed class SyncAutomationRule
 
     private SyncAutomationRule() { }
 
-    public SyncAutomationRule(Guid id, Guid tenantId, string name, short status, int intervalMinutes, int pageSize, int maxPages, DateTimeOffset nowUtc)
+    // ✅ signature backwards compatible (existing calls compile)
+    public SyncAutomationRule(
+        Guid id,
+        Guid tenantId,
+        string name,
+        short status,
+        int intervalMinutes,
+        int pageSize,
+        int maxPages,
+        DateTimeOffset nowUtc,
+        int jitterMinutes = 0,
+        string? jobKindsJson = null)
     {
         Id = id;
         TenantId = tenantId;
@@ -34,7 +51,10 @@ public sealed class SyncAutomationRule
         PageSize = pageSize;
         MaxPages = maxPages;
 
-        NextRunAtUtc = nowUtc.AddMinutes(intervalMinutes);
+        JitterMinutes = Math.Clamp(jitterMinutes, 0, 10);
+        JobKindsJson = string.IsNullOrWhiteSpace(jobKindsJson) ? "[]" : jobKindsJson;
+
+        NextRunAtUtc = ComputeNextRun(nowUtc);
         LastEnqueuedAtUtc = null;
 
         CreatedAtUtc = nowUtc;
@@ -44,10 +64,22 @@ public sealed class SyncAutomationRule
     public void Activate(DateTimeOffset nowUtc) { Status = 1; UpdatedAtUtc = nowUtc; }
     public void Pause(DateTimeOffset nowUtc) { Status = 2; UpdatedAtUtc = nowUtc; }
 
+    public void UpdateJobKinds(string jobKindsJson, DateTimeOffset nowUtc)
+    {
+        JobKindsJson = string.IsNullOrWhiteSpace(jobKindsJson) ? "[]" : jobKindsJson;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void UpdateJitter(int jitterMinutes, DateTimeOffset nowUtc)
+    {
+        JitterMinutes = Math.Clamp(jitterMinutes, 0, 10);
+        UpdatedAtUtc = nowUtc;
+    }
+
     public void TouchScheduled(DateTimeOffset nowUtc)
     {
         LastEnqueuedAtUtc = nowUtc;
-        NextRunAtUtc = nowUtc.AddMinutes(IntervalMinutes);
+        NextRunAtUtc = ComputeNextRun(nowUtc);
         LockedBy = null;
         LockedAtUtc = null;
         UpdatedAtUtc = nowUtc;
@@ -58,5 +90,27 @@ public sealed class SyncAutomationRule
         LockedBy = null;
         LockedAtUtc = null;
         UpdatedAtUtc = nowUtc;
+    }
+
+    public IReadOnlyList<string> GetJobKindsSafe()
+    {
+        if (string.IsNullOrWhiteSpace(JobKindsJson)) return Array.Empty<string>();
+
+        try
+        {
+            var arr = JsonSerializer.Deserialize<string[]>(JobKindsJson);
+            return arr?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct().ToArray()
+                   ?? Array.Empty<string>();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private DateTimeOffset ComputeNextRun(DateTimeOffset nowUtc)
+    {
+        var jitter = JitterMinutes <= 0 ? 0 : Random.Shared.Next(0, JitterMinutes + 1);
+        return nowUtc.AddMinutes(IntervalMinutes + jitter);
     }
 }

@@ -94,6 +94,15 @@ internal sealed class SyncAutomationSchedulerWorker : BackgroundService
                             return;
                         }
 
+                        var selectedKinds = rule.GetJobKindsSafe(); // may be empty
+                        var hasSelection = selectedKinds.Count > 0;
+
+                        bool Want(string k)
+                        {
+                            if (!hasSelection) return true; // ✅ fallback to default behavior
+                            return selectedKinds.Contains(k, StringComparer.OrdinalIgnoreCase);
+                        }
+
                         var batchId = Guid.NewGuid();
                         await db.Set<SyncAutomationBatch>().AddAsync(new SyncAutomationBatch(batchId, tenantGuid, ruleId, now), stoppingToken);
 
@@ -103,19 +112,26 @@ internal sealed class SyncAutomationSchedulerWorker : BackgroundService
                             if (conn is null || conn.TenantId.Value != tenantGuid || conn.Status != ProviderConnectionStatus.Active)
                                 continue;
 
-                            // Provider bazlı job seti
                             if (conn.ProviderType == ProviderType.Ikas)
                             {
-                                await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncCustomers, rule.PageSize, rule.MaxPages), stoppingToken);
-                                await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncOrders, rule.PageSize, rule.MaxPages), stoppingToken);
-                                await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncAbandonedCheckouts, rule.PageSize, rule.MaxPages), stoppingToken);
+                                // ✅ jobKinds doluysa seçime göre, boşsa eski default (hepsi)
+                                if (Want("ikas.customers"))
+                                    await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncCustomers, rule.PageSize, rule.MaxPages), stoppingToken);
+
+                                if (Want("ikas.orders"))
+                                    await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncOrders, rule.PageSize, rule.MaxPages), stoppingToken);
+
+                                if (Want("ikas.abandoned"))
+                                    await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncAbandonedCheckouts, rule.PageSize, rule.MaxPages), stoppingToken);
                             }
                             else if (conn.ProviderType == ProviderType.Trendyol)
                             {
-                                await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.TrendyolSyncOrders, rule.PageSize, rule.MaxPages), stoppingToken);
+                                if (Want("trendyol.orders"))
+                                    await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.TrendyolSyncOrders, rule.PageSize, rule.MaxPages), stoppingToken);
                             }
                         }
 
+                        // ✅ jitter burada devreye giriyor (rule içinde computeNextRun)
                         rule.TouchScheduled(now);
 
                         await db.SaveChangesAsync(stoppingToken);
@@ -141,7 +157,6 @@ internal sealed class SyncAutomationSchedulerWorker : BackgroundService
 
     private async Task<(Guid ruleId, Guid tenantId)?> TryClaimDueRuleAsync(ProfiqoDbContext db, CancellationToken ct)
     {
-        // lock timeout: 10 dakika
         var sql = @"
 WITH cte AS (
   SELECT id

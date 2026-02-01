@@ -19,6 +19,8 @@ type Rule = {
   intervalMinutes: number;
   pageSize: number;
   maxPages: number;
+  jitterMinutes: number;
+  jobKinds: string[];
   nextRunAtUtc: string;
   lastEnqueuedAtUtc: string | null;
   connectionIds: string[];
@@ -32,6 +34,13 @@ const intervalOptions = [
   { label: "Haftada 1", value: 10080 },
 ];
 
+const jobKindOptions = [
+  { key: "ikas.customers", label: "İkas: Customers" },
+  { key: "ikas.orders", label: "İkas: Orders" },
+  { key: "ikas.abandoned", label: "İkas: Abandoned Checkouts" },
+  { key: "trendyol.orders", label: "Trendyol: Orders" },
+];
+
 export default function SyncRulesPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
@@ -43,12 +52,26 @@ export default function SyncRulesPage() {
   const [pageSize, setPageSize] = useState(100);
   const [maxPages, setMaxPages] = useState(50);
 
+  // ✅ NEW
+  const [jitterMinutes, setJitterMinutes] = useState(3);
+  const [jobKindsSel, setJobKindsSel] = useState<Record<string, boolean>>({
+    "ikas.customers": true,
+    "ikas.orders": true,
+    "ikas.abandoned": true,
+    "trendyol.orders": true,
+  });
+
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   const selectedIds = useMemo(
     () => Object.entries(selected).filter(([, v]) => v).map(([k]) => k),
     [selected]
+  );
+
+  const selectedJobKinds = useMemo(
+    () => jobKindOptions.filter((x) => jobKindsSel[x.key]).map((x) => x.key),
+    [jobKindsSel]
   );
 
   async function load() {
@@ -68,7 +91,10 @@ export default function SyncRulesPage() {
       const rJson = await rRes.json();
 
       setConnections(cJson.items ?? []);
-      setRules(rJson.items ?? []);
+      setRules((rJson.items ?? []).map((x: any) => ({
+        ...x,
+        jobKinds: (x.jobKinds ?? []) as string[],
+      })) as any);
 
       const init: Record<string, boolean> = {};
       (cJson.items ?? []).forEach((x: Connection) => (init[x.connectionId] = true));
@@ -87,6 +113,10 @@ export default function SyncRulesPage() {
     setInfo(null);
 
     try {
+      if (selectedIds.length === 0) throw new Error("En az 1 connection seçmelisin.");
+      if (selectedJobKinds.length === 0) throw new Error("En az 1 job type seçmelisin.");
+      if (jitterMinutes < 0 || jitterMinutes > 10) throw new Error("Jitter 0-10 dakika olmalı.");
+
       const res = await fetch("/api/automation/sync/rules", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -96,6 +126,8 @@ export default function SyncRulesPage() {
           connectionIds: selectedIds,
           pageSize,
           maxPages,
+          jobKinds: selectedJobKinds,
+          jitterMinutes,
         }),
       });
 
@@ -174,6 +206,32 @@ export default function SyncRulesPage() {
               onChange={(e) => setMaxPages(Number(e.target.value))}
             />
           </label>
+
+          <label className="text-sm">
+            Jitter (0-10 dk)
+            <input
+              type="number"
+              min={0}
+              max={10}
+              className="mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              value={jitterMinutes}
+              onChange={(e) => setJitterMinutes(Number(e.target.value))}
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 text-sm font-medium">Job Types</div>
+        <div className="mt-2 grid gap-2 md:grid-cols-2">
+          {jobKindOptions.map((j) => (
+            <label key={j.key} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={!!jobKindsSel[j.key]}
+                onChange={(e) => setJobKindsSel((p) => ({ ...p, [j.key]: e.target.checked }))}
+              />
+              <span>{j.label}</span>
+            </label>
+          ))}
         </div>
 
         <div className="mt-4 text-sm font-medium">Çalışacak bağlantılar</div>
@@ -192,7 +250,9 @@ export default function SyncRulesPage() {
         </div>
 
         <div className="mt-4">
-          <Button onClick={createRule} disabled={selectedIds.length === 0}>Rule Oluştur</Button>
+          <Button onClick={createRule} disabled={selectedIds.length === 0}>
+            Rule Oluştur
+          </Button>
         </div>
 
         {err && <div className="mt-3 text-sm text-red-600">{err}</div>}
@@ -212,10 +272,13 @@ export default function SyncRulesPage() {
                 <div>
                   <div className="font-semibold">{r.name}</div>
                   <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                    Status: {r.status}, Interval: {r.intervalMinutes} dk, Next: {new Date(r.nextRunAtUtc).toLocaleString()}
+                    Status: {r.status}, Interval: {r.intervalMinutes} dk, Jitter: {r.jitterMinutes} dk
                   </div>
                   <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                    Connections: {r.connectionIds.length}
+                    Next: {new Date(r.nextRunAtUtc).toLocaleString()} | Connections: {r.connectionIds.length}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    JobKinds: {(r.jobKinds ?? []).join(", ") || "(default)"}
                   </div>
                 </div>
 

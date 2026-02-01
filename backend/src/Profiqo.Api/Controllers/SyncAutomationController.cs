@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Text.Json;
+
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,6 +18,15 @@ namespace Profiqo.Api.Controllers;
 public sealed class SyncAutomationController : ControllerBase
 {
     private static readonly int[] AllowedIntervals = [180, 360, 720, 1440, 10080];
+
+    // ✅ NEW: allowed job kinds
+    private static readonly HashSet<string> AllowedJobKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ikas.customers",
+        "ikas.orders",
+        "ikas.abandoned",
+        "trendyol.orders"
+    };
 
     private readonly ITenantContext _tenant;
     private readonly ProfiqoDbContext _db;
@@ -52,7 +63,10 @@ public sealed class SyncAutomationController : ControllerBase
         int IntervalMinutes,
         IReadOnlyList<Guid> ConnectionIds,
         int? PageSize,
-        int? MaxPages);
+        int? MaxPages,
+        IReadOnlyList<string>? JobKinds,   // ✅ NEW
+        int? JitterMinutes                // ✅ NEW (0..10)
+    );
 
     [HttpGet("rules")]
     public async Task<IActionResult> ListRules(CancellationToken ct)
@@ -75,6 +89,19 @@ public sealed class SyncAutomationController : ControllerBase
 
         var map = rel.GroupBy(x => x.RuleId).ToDictionary(g => g.Key, g => g.Select(x => x.ConnectionId).ToArray());
 
+        object[] ParseJobKinds(string json)
+        {
+            try
+            {
+                var arr = JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+                return arr.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => (object)x.Trim()).Distinct().ToArray();
+            }
+            catch
+            {
+                return Array.Empty<object>();
+            }
+        }
+
         var items = rules.Select(r => new
         {
             id = r.Id,
@@ -83,6 +110,8 @@ public sealed class SyncAutomationController : ControllerBase
             intervalMinutes = r.IntervalMinutes,
             pageSize = r.PageSize,
             maxPages = r.MaxPages,
+            jitterMinutes = r.JitterMinutes,             // ✅ NEW
+            jobKinds = ParseJobKinds(r.JobKindsJson),    // ✅ NEW
             nextRunAtUtc = r.NextRunAtUtc,
             lastEnqueuedAtUtc = r.LastEnqueuedAtUtc,
             connectionIds = map.TryGetValue(r.Id, out var ids) ? ids : Array.Empty<Guid>()
@@ -101,8 +130,25 @@ public sealed class SyncAutomationController : ControllerBase
         if (!AllowedIntervals.Contains(req.IntervalMinutes)) return BadRequest(new { message = "Invalid intervalMinutes" });
         if (req.ConnectionIds is null || req.ConnectionIds.Count == 0) return BadRequest(new { message = "At least one connection required" });
 
-        var now = DateTimeOffset.UtcNow;
+        var jitter = req.JitterMinutes is null ? 0 : Math.Clamp(req.JitterMinutes.Value, 0, 10);
 
+        var jobKinds = (req.JobKinds ?? Array.Empty<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().ToLowerInvariant())
+            .Distinct()
+            .ToList();
+
+        // ✅ Backwards compatible: if client sends nothing, allow empty, scheduler will fallback to default set.
+        // Ama UI'da mutlaka seçtireceğiz.
+        foreach (var k in jobKinds)
+        {
+            if (!AllowedJobKinds.Contains(k))
+                return BadRequest(new { message = $"Invalid jobKind: {k}" });
+        }
+
+        var jobKindsJson = JsonSerializer.Serialize(jobKinds);
+
+        var now = DateTimeOffset.UtcNow;
         var ruleId = Guid.NewGuid();
         var tenantGuid = tenantId.Value.Value;
 
@@ -117,7 +163,9 @@ public sealed class SyncAutomationController : ControllerBase
             intervalMinutes: req.IntervalMinutes,
             pageSize: pageSize,
             maxPages: maxPages,
-            nowUtc: now);
+            nowUtc: now,
+            jitterMinutes: jitter,
+            jobKindsJson: jobKindsJson);
 
         await _db.Set<SyncAutomationRule>().AddAsync(rule, ct);
 
@@ -168,116 +216,5 @@ public sealed class SyncAutomationController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return Ok();
-    }
-
-    [HttpGet("runs")]
-    public async Task<IActionResult> ListRuns([FromQuery] int take = 50, CancellationToken ct = default)
-    {
-        var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null) return BadRequest(new { message = "Missing tenant context" });
-
-        var tenantGuid = tenantId.Value.Value;
-        if (take <= 0) take = 50;
-        if (take > 200) take = 200;
-
-        var batches = await _db.Set<SyncAutomationBatch>().AsNoTracking()
-            .Where(x => x.TenantId == tenantGuid)
-            .OrderByDescending(x => x.ScheduledAtUtc)
-            .Take(take)
-            .ToListAsync(ct);
-
-        var batchIds = batches.Select(x => x.BatchId).ToList();
-
-        var jobsAgg = await _db.Set<IntegrationJob>().AsNoTracking()
-            .Where(j => batchIds.Contains(j.BatchId))
-            .GroupBy(j => j.BatchId)
-            .Select(g => new
-            {
-                batchId = g.Key,
-                total = g.Count(),
-                queued = g.Count(x => x.Status == Application.Integrations.Jobs.IntegrationJobStatus.Queued),
-                running = g.Count(x => x.Status == Application.Integrations.Jobs.IntegrationJobStatus.Running),
-                succeeded = g.Count(x => x.Status == Application.Integrations.Jobs.IntegrationJobStatus.Succeeded),
-                failed = g.Count(x => x.Status == Application.Integrations.Jobs.IntegrationJobStatus.Failed),
-                lastError = g.Where(x => x.LastError != null).OrderByDescending(x => x.UpdatedAtUtc).Select(x => x.LastError).FirstOrDefault()
-            })
-            .ToListAsync(ct);
-
-        var aggMap = jobsAgg.ToDictionary(x => x.batchId, x => x);
-
-        string StatusOf(dynamic a)
-        {
-            if (a.failed > 0) return "failed";
-            if (a.total > 0 && a.succeeded == a.total) return "succeeded";
-            if (a.running > 0) return "running";
-            return "queued";
-        }
-
-        var items = batches.Select(b =>
-        {
-            if (!aggMap.TryGetValue(b.BatchId, out var a))
-            {
-                return new
-                {
-                    batchId = b.BatchId,
-                    ruleId = b.RuleId,
-                    scheduledAtUtc = b.ScheduledAtUtc,
-                    status = "queued",
-                    totalJobs = 0,
-                    lastError = (string?)null
-                };
-            }
-
-            return new
-            {
-                batchId = b.BatchId,
-                ruleId = b.RuleId,
-                scheduledAtUtc = b.ScheduledAtUtc,
-                status = StatusOf(a),
-                totalJobs = (int)a.total,
-                lastError = (string?)a.lastError
-            };
-        });
-
-        return Ok(new { items });
-    }
-
-    [HttpGet("runs/{batchId:guid}")]
-    public async Task<IActionResult> GetRun(Guid batchId, CancellationToken ct)
-    {
-        var tenantId = _tenant.CurrentTenantId;
-        if (tenantId is null) return BadRequest(new { message = "Missing tenant context" });
-
-        var tenantGuid = tenantId.Value.Value;
-
-        var batch = await _db.Set<SyncAutomationBatch>().AsNoTracking()
-            .FirstOrDefaultAsync(x => x.BatchId == batchId && x.TenantId == tenantGuid, ct);
-
-        if (batch is null) return NotFound();
-
-        var jobs = await _db.Set<IntegrationJob>().AsNoTracking()
-            .Where(j => j.BatchId == batchId)
-            .OrderBy(j => j.CreatedAtUtc)
-            .Select(j => new
-            {
-                jobId = j.Id,
-                kind = j.Kind.ToString(),
-                status = j.Status.ToString(),
-                connectionId = j.ConnectionId,
-                processedItems = j.ProcessedItems,
-                createdAtUtc = j.CreatedAtUtc,
-                startedAtUtc = j.StartedAtUtc,
-                finishedAtUtc = j.FinishedAtUtc,
-                lastError = j.LastError
-            })
-            .ToListAsync(ct);
-
-        return Ok(new
-        {
-            batchId = batch.BatchId,
-            ruleId = batch.RuleId,
-            scheduledAtUtc = batch.ScheduledAtUtc,
-            jobs
-        });
     }
 }
