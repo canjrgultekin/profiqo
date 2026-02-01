@@ -3,14 +3,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-using Microsoft.AspNetCore.Http;
-
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Abstractions.Persistence;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Domain.Common.Ids;
-using Profiqo.Domain.Common.Types;
 using Profiqo.Domain.Integrations;
 
 namespace Profiqo.Application.Integrations.Ikas;
@@ -29,11 +26,14 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
     private const long InitialCutoffMs = 0;
 
     private const string CustomerCursorKey = "ikas.customers.cursor.updatedAtMs";
-    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs"; // updatedAt üzerinden cursor
+    private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs";
+
+    private sealed record IkasPrivateAppCreds(string StoreName, string ClientId, string ClientSecret);
 
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
     private readonly IIkasGraphqlClient _ikas;
+    private readonly IIkasOAuthTokenClient _oauth;
     private readonly IIkasSyncStore _store;
     private readonly IIntegrationJobRepository _jobs;
     private readonly IIntegrationCursorRepository _cursors;
@@ -42,6 +42,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         IProviderConnectionRepository connections,
         ISecretProtector secrets,
         IIkasGraphqlClient ikas,
+        IIkasOAuthTokenClient oauth,
         IIkasSyncStore store,
         IIntegrationJobRepository jobs,
         IIntegrationCursorRepository cursors)
@@ -49,6 +50,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         _connections = connections;
         _secrets = secrets;
         _ikas = ikas;
+        _oauth = oauth;
         _store = store;
         _jobs = jobs;
         _cursors = cursors;
@@ -61,22 +63,19 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
             throw new InvalidOperationException("Ikas connection not found for tenant.");
 
-        var token = _secrets.Unprotect(conn.AccessToken);
+        var (storeName, token) = await GetAuthAsync(conn, ct);
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var initialCutoffMs = InitialCutoffMs;
-
-        var cursorMs = await GetCursorMsOrNull(tenantId, connId, CustomerCursorKey, ct);
-        var stopBeforeMs = cursorMs ?? initialCutoffMs;
+        var stopBeforeMs = (await GetCursorMsOrNull(tenantId, connId, CustomerCursorKey, ct)) ?? InitialCutoffMs;
 
         var processed = 0;
-        long maxSeenUpdatedAt = cursorMs ?? 0;
+        long maxSeenUpdatedAt = stopBeforeMs > 0 ? stopBeforeMs : 0;
 
         for (var page = 1; page <= maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
-            using var doc = await _ikas.ListCustomersAsync(token, page, pageSize, ct);
+            using var doc = await _ikas.ListCustomersAsync(storeName, token, page, pageSize, ct);
 
             var list = doc.RootElement.GetProperty("data").GetProperty("listCustomer");
             var data = list.GetProperty("data");
@@ -130,7 +129,6 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 break;
         }
 
-        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama upsert idempotent olduğu için veri kaçırmayız.
         var nextCursor = maxSeenUpdatedAt > 0 ? maxSeenUpdatedAt : nowMs;
         await _cursors.UpsertAsync(tenantId, connId, CustomerCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
@@ -144,18 +142,14 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
             throw new InvalidOperationException("Ikas connection not found for tenant.");
 
-        var token = _secrets.Unprotect(conn.AccessToken);
+        var (storeName, token) = await GetAuthAsync(conn, ct);
 
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var initialCutoffMs = InitialCutoffMs;
-
         var cursorMs = await GetCursorMsOrNull(tenantId, connId, OrderCursorKey, ct);
 
-        // Server-side updatedAt filter bazen boş döndürme riskli.
-        // Bu yüzden server-side updatedAt filter'ı sadece cursor varsa kullanıyoruz.
+        // Server-side updatedAt filter sadece cursor varsa kullanılır.
         var updatedAtGteMs = cursorMs;
-
-        var stopBeforeMs = cursorMs ?? initialCutoffMs;
+        var stopBeforeMs = cursorMs ?? InitialCutoffMs;
 
         var processed = 0;
         long maxSeenUpdatedAt = cursorMs ?? 0;
@@ -164,7 +158,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         {
             ct.ThrowIfCancellationRequested();
 
-            using var doc = await _ikas.ListOrdersAsync(token, page, pageSize, updatedAtGteMs, ct);
+            using var doc = await _ikas.ListOrdersAsync(storeName, token, page, pageSize, updatedAtGteMs, ct);
 
             var list = doc.RootElement.GetProperty("data").GetProperty("listOrder");
             var data = list.GetProperty("data");
@@ -234,8 +228,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                         string? variantId = null;
                         string? productId = null;
 
-                        string? productCategory = null; // Ikas: category name
-                        string? barcode = null;         // Ikas: barcodeList[0]
+                        string? productCategory = null;
+                        string? barcode = null;
 
                         if (li.TryGetProperty("variant", out var v) && v.ValueKind == JsonValueKind.Object)
                         {
@@ -275,10 +269,10 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     }
                 }
 
-
                 string? shippingJson = null;
                 if (o.TryGetProperty("shippingAddress", out var ship) && ship.ValueKind == JsonValueKind.Object)
                     shippingJson = ship.GetRawText();
+
                 string? billingJson = null;
                 if (o.TryGetProperty("billingAddress", out var bill) && bill.ValueKind == JsonValueKind.Object)
                     billingJson = bill.GetRawText();
@@ -309,7 +303,6 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                 break;
         }
 
-        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama order upsert providerOrderId ile idempotent.
         var nextCursor = maxSeenUpdatedAt > 0 ? maxSeenUpdatedAt : nowMs;
         await _cursors.UpsertAsync(tenantId, connId, OrderCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
@@ -323,7 +316,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
             throw new InvalidOperationException("Ikas connection not found for tenant.");
 
-        var token = _secrets.Unprotect(conn.AccessToken);
+        var (storeName, token) = await GetAuthAsync(conn, ct);
 
         const string cursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
 
@@ -340,7 +333,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         {
             ct.ThrowIfCancellationRequested();
 
-            using var doc = await _ikas.ListAbandonedCheckoutsAsync(token, page, pageSize, gteMs, ct);
+            using var doc = await _ikas.ListAbandonedCheckoutsAsync(storeName, token, page, pageSize, gteMs, ct);
 
             var list = doc.RootElement.GetProperty("data").GetProperty("listAbandonedCheckouts");
             var data = list.GetProperty("data");
@@ -423,6 +416,48 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
         await _cursors.UpsertAsync(tenantId, connId, cursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;
+    }
+
+    private async Task<(string StoreName, string AccessToken)> GetAuthAsync(ProviderConnection conn, CancellationToken ct)
+    {
+        var raw = _secrets.Unprotect(conn.AccessToken);
+
+        var storeFromConn = (conn.ExternalAccountId ?? string.Empty).Trim();
+
+        if (TryParseCreds(raw, out var creds))
+        {
+            var storeName = string.IsNullOrWhiteSpace(creds.StoreName) ? storeFromConn : creds.StoreName.Trim();
+            if (string.IsNullOrWhiteSpace(storeName))
+                throw new InvalidOperationException("Ikas storeName missing on connection.");
+
+            var token = await _oauth.GetAccessTokenAsync(storeName, creds.ClientId, creds.ClientSecret, ct);
+            return (storeName, token.AccessToken);
+        }
+
+        // Legacy token mode
+        return (storeFromConn, raw);
+    }
+
+    private static bool TryParseCreds(string raw, out IkasPrivateAppCreds creds)
+    {
+        creds = default!;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+            var s = raw.TrimStart();
+            if (!s.StartsWith("{", StringComparison.Ordinal)) return false;
+
+            var c = JsonSerializer.Deserialize<IkasPrivateAppCreds>(raw);
+            if (c is null) return false;
+            if (string.IsNullOrWhiteSpace(c.ClientId) || string.IsNullOrWhiteSpace(c.ClientSecret)) return false;
+
+            creds = c;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<long?> GetCursorMsOrNull(TenantId tenantId, ProviderConnectionId connId, string key, CancellationToken ct)

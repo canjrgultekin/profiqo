@@ -29,7 +29,7 @@ internal sealed class IkasGraphqlClient : IIkasGraphqlClient
         _opts = opts.Value;
     }
 
-    public async Task<string> MeAsync(string accessToken, CancellationToken ct)
+    public async Task<string> MeAsync(string storeName, string accessToken, CancellationToken ct)
     {
         const string op = "me";
         var payload = new
@@ -39,12 +39,12 @@ internal sealed class IkasGraphqlClient : IIkasGraphqlClient
             variables = new { }
         };
 
-        using var doc = await PostAsync(accessToken, op, payload, ct);
+        using var doc = await PostAsync(storeName, accessToken, op, payload, ct);
         var id = doc.RootElement.GetProperty("data").GetProperty("me").GetProperty("id").GetString();
         return id ?? throw new InvalidOperationException("Ikas me.id missing.");
     }
 
-    public Task<JsonDocument> ListCustomersAsync(string accessToken, int page, int limit, CancellationToken ct)
+    public Task<JsonDocument> ListCustomersAsync(string storeName, string accessToken, int page, int limit, CancellationToken ct)
     {
         const string op = "listCustomer";
 
@@ -87,12 +87,12 @@ query listCustomer(
             }
         };
 
-        return PostAsync(accessToken, op, payload, ct);
+        return PostAsync(storeName, accessToken, op, payload, ct);
     }
 
     // ✅ Updated query: shippingAddress included, updatedAt filter included
     // Signature stays the same to avoid breaking callers; orderedAtGteMs param is now used as updatedAt.gte
-    public Task<JsonDocument> ListOrdersAsync(string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct)
+    public Task<JsonDocument> ListOrdersAsync(string storeName, string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct)
     {
         const string op = "listOrder";
 
@@ -247,10 +247,10 @@ query listOrder(
             }
         };
 
-        return PostAsync(accessToken, op, payload, ct);
+        return PostAsync(storeName, accessToken, op, payload, ct);
     }
 
-    public Task<JsonDocument> ListAbandonedCheckoutsAsync(string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct)
+    public Task<JsonDocument> ListAbandonedCheckoutsAsync(string storeName, string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct)
     {
         const string op = "listAbandonedCheckouts";
 
@@ -304,12 +304,14 @@ query listAbandonedCheckouts (
             }
         };
 
-        return PostAsync(accessToken, op, payload, ct);
+        return PostAsync(storeName, accessToken, op, payload, ct);
     }
 
-    private async Task<JsonDocument> PostAsync(string accessToken, string op, object body, CancellationToken ct)
+
+    private async Task<JsonDocument> PostAsync(string storeName, string accessToken, string op, object body, CancellationToken ct)
     {
-        var url = QueryHelpers.AddQueryString(_opts.GraphqlEndpoint, "op", op);
+        var endpoint = ResolveGraphqlEndpoint(storeName);
+        var url = QueryHelpers.AddQueryString(endpoint, "op", op);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -340,5 +342,13 @@ query listAbandonedCheckouts (
         }
 
         return doc;
+    }
+
+    private string ResolveGraphqlEndpoint(string storeName)
+    {
+        var s = (storeName ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(s))
+            return $"https://{s}.myikas.com/api/admin/graphql";
+        return _opts.GraphqlEndpoint;
     }
 }

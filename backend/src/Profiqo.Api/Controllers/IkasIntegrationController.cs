@@ -60,15 +60,17 @@ public sealed class IkasIntegrationController : ControllerBase
         });
     }
 
-    public sealed record ConnectRequest(string StoreLabel, string? StoreDomain, string AccessToken);
+    public sealed record ConnectRequest(string StoreLabel, string StoreName, string? ClientId, string? ClientSecret);
 
     [HttpPost("connect")]
     public async Task<IActionResult> Connect([FromBody] ConnectRequest req, CancellationToken ct)
     {
-        var id = await _sender.Send(new ConnectIkasCommand(req.StoreLabel, req.StoreDomain, req.AccessToken), ct);
+        var id = await _sender.Send(
+            new ConnectIkasCommand(req.StoreLabel, req.StoreName, req.ClientId ?? string.Empty, req.ClientSecret ?? string.Empty),
+            ct);
+
         return Ok(new { connectionId = id });
     }
-
     public sealed record TestRequest(Guid ConnectionId);
 
     [HttpPost("test")]

@@ -1,4 +1,4 @@
-// Path: apps/admin/src/app/integrations/ikas/page.tsx
+// Path: apps/admin/src/app/(dashboard)/integrations/ikas/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -70,8 +70,9 @@ function normalizeBatch(payload: any): BatchResponse {
 
 export default function IkasIntegrationPage() {
   const [storeLabel, setStoreLabel] = useState("");
-  const [storeDomain, setStoreDomain] = useState("");
-  const [accessToken, setAccessToken] = useState("");
+  const [storeName, setStoreName] = useState(""); // myikas subdomain (örn: "mystore")
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
 
   const [hasExisting, setHasExisting] = useState(false);
   const [connectionId, setConnectionId] = useState<string | null>(null);
@@ -122,9 +123,11 @@ export default function IkasIntegrationPage() {
       setConnectionId(cid);
 
       setStoreLabel(payload?.displayName ?? payload?.DisplayName ?? "");
-      setStoreDomain(payload?.externalAccountId ?? payload?.ExternalAccountId ?? "");
+      setStoreName(payload?.externalAccountId ?? payload?.ExternalAccountId ?? "");
 
-      setAccessToken("");
+      // Güvenlik: DB'de saklı secrets'ları UI'ya geri basmıyoruz
+      setClientId("");
+      setClientSecret("");
 
       append(`Existing Ikas connection loaded. connectionId=${cid}`);
     };
@@ -141,15 +144,38 @@ export default function IkasIntegrationPage() {
     setBatchId(null);
     setBatch(null);
 
-    if (hasExisting && !accessToken.trim()) {
-      append("UPDATE TOKEN ERROR: Mevcut connection var. Token güncellemek için Access Token girmen lazım.");
+    const label = storeLabel.trim();
+    const sname = storeName.trim();
+    const cid = clientId.trim();
+    const csec = clientSecret.trim();
+
+    if (!label) {
+      append("VALIDATION ERROR: Store Label zorunlu.");
       return;
+    }
+
+    if (!sname) {
+      append("VALIDATION ERROR: Store Name zorunlu. (örn: mystore -> https://mystore.myikas.com)");
+      return;
+    }
+
+    // İlk connect'te clientId/secret zorunlu
+    if (!hasExisting) {
+      if (!cid || !csec) {
+        append("VALIDATION ERROR: İlk bağlantıda Client ID ve Client Secret zorunlu.");
+        return;
+      }
     }
 
     const res = await fetch("/api/integrations/ikas/connect", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ storeLabel, storeDomain, accessToken }),
+      body: JSON.stringify({
+        storeLabel: label,
+        storeName: sname,
+        clientId: cid,        // mevcut connection varsa boş gönderilebilir (backend rotate etmez)
+        clientSecret: csec,   // mevcut connection varsa boş gönderilebilir
+      }),
     });
 
     const payload = await res.json().catch(() => null);
@@ -159,12 +185,15 @@ export default function IkasIntegrationPage() {
       return;
     }
 
-    const cid = payload?.connectionId ?? payload?.ConnectionId;
-    setConnectionId(cid);
+    const newId = payload?.connectionId ?? payload?.ConnectionId;
+    setConnectionId(newId);
     setHasExisting(true);
-    setAccessToken("");
 
-    append(`${hasExisting ? "Updated" : "Connected"}. connectionId=${cid}`);
+    // Secret'ı hemen temizle
+    setClientSecret("");
+
+    append(`${hasExisting ? "Updated" : "Connected"}. connectionId=${newId}`);
+    append("Not: Token yönetimi otomatik. Bu bilgilerle her sync öncesi access token alınacak.");
   };
 
   const test = async () => {
@@ -273,7 +302,10 @@ export default function IkasIntegrationPage() {
   return (
     <div className="p-4 sm:p-6">
       <div className="rounded-[10px] bg-white p-4 shadow-1 dark:bg-gray-dark dark:shadow-card">
-        <h2 className="mb-4 text-lg font-semibold text-dark dark:text-white">Ikas Integration</h2>
+        <h2 className="mb-1 text-lg font-semibold text-dark dark:text-white">Ikas Integration</h2>
+        <p className="mb-4 text-sm text-body-color dark:text-dark-6">
+          Token yapıştırma yok. StoreName + ClientID + ClientSecret ile her sync öncesi otomatik access token alınır.
+        </p>
 
         <div className="grid gap-3 md:grid-cols-2">
           <div>
@@ -282,39 +314,59 @@ export default function IkasIntegrationPage() {
               className="w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
               value={storeLabel}
               onChange={(e) => setStoreLabel(e.target.value)}
-              placeholder="Örn: profiqo"
+              placeholder="Örn: Profiqo Ikas"
             />
           </div>
 
           <div>
-            <label className="text-sm text-body-color dark:text-dark-6">Store Domain (opsiyonel)</label>
+            <label className="text-sm text-body-color dark:text-dark-6">Store Name</label>
             <input
               className="w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
-              value={storeDomain}
-              onChange={(e) => setStoreDomain(e.target.value)}
-              placeholder="Örn: https://www.example.com"
+              value={storeName}
+              onChange={(e) => setStoreName(e.target.value)}
+              placeholder="Örn: mystore (https://mystore.myikas.com)"
             />
           </div>
 
-          <div className="md:col-span-2">
+          <div>
             <label className="text-sm text-body-color dark:text-dark-6">
-              Access Token {hasExisting ? "(stored, paste here to rotate/update)" : ""}
+              Client ID {hasExisting ? "(opsiyonel: güncellemek için)" : ""}
             </label>
-            <textarea
-              className="min-h-[120px] w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
-              value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-              placeholder={hasExisting ? "Token DB'de var. Güncellemek istersen buraya yeni token yapıştır." : "Bearer token"}
+            <input
+              className="w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder={hasExisting ? "Boş bırakılırsa mevcut credentials korunur" : "client_id"}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-body-color dark:text-dark-6">
+              Client Secret {hasExisting ? "(opsiyonel: güncellemek için)" : ""}
+            </label>
+            <input
+              type="password"
+              className="w-full rounded-lg border border-stroke bg-transparent px-4 py-2 text-dark outline-none focus:border-primary dark:border-dark-3 dark:text-white"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder={hasExisting ? "Boş bırakılırsa mevcut credentials korunur" : "client_secret"}
             />
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90" onClick={connectOrUpdate}>
-            {hasExisting ? "Update Token" : "Connect"}
+          <button
+            className="rounded-lg bg-primary px-4 py-2 font-medium text-white hover:bg-opacity-90"
+            onClick={connectOrUpdate}
+          >
+            {hasExisting ? "Save / Update" : "Connect"}
           </button>
 
-          <button className="rounded-lg border border-stroke px-4 py-2 text-dark dark:border-dark-3 dark:text-white" onClick={test} disabled={!connectionId}>
+          <button
+            className="rounded-lg border border-stroke px-4 py-2 text-dark dark:border-dark-3 dark:text-white"
+            onClick={test}
+            disabled={!connectionId}
+          >
             Test Connection
           </button>
 

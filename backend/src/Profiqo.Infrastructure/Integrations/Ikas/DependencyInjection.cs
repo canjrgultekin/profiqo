@@ -11,6 +11,8 @@ public static class DependencyInjection
     {
         services.Configure<IkasOptions>(cfg.GetSection("Profiqo:Integrations:Ikas"));
         services.AddHttpClient<IIkasGraphqlClient, IkasGraphqlClient>();
+        services.AddHttpClient<IIkasOAuthTokenClient, IkasOAuthTokenClient>();
+
         services.AddScoped<IIkasSyncStore, IkasSyncStore>();
         return services;
     }
