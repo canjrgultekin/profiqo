@@ -1,5 +1,9 @@
-﻿using System.Net.Http.Headers;
+﻿using System.Buffers.Text;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Common.Exceptions;
@@ -11,18 +15,66 @@ namespace Profiqo.Infrastructure.Integrations.Ikas;
 internal sealed class IkasOAuthTokenClient : IIkasOAuthTokenClient
 {
     private readonly HttpClient _http;
+    private const string BaseUrl = "https://profiqo.myikas.com/api/admin/graphql?op=refreshToken";
+    private const string CurrentToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYwNzU2ZmU1LTZjZTEtNGQ5Ni1hYjkyLTk4NWIyMzU1YTEzYiIsImVtYWlsIjoiY2FuLmt1Y3VrZ3VsdGVraW5AZ21haWwuY29tIiwiZmlyc3ROYW1lIjoiY2FuIiwibGFzdE5hbWUiOiJrdWN1a2d1bHRla2luIiwibWVyY2hhbnRJZCI6IjczYzQyNDU1LWI2OWQtNGQ5Ny05ZjljLWY4NTdjZGE5ZTM1YyIsInN0b3JlTmFtZSI6InByb2ZpcW8iLCJpbWFnZUlkIjpudWxsLCJ0eXBlIjoyLCJmZWF0dXJlcyI6WzIsMyw0LDUsNTAwLDUwMSwxMSwxMiwxOCwxLDMwMSwzMDAsNyw4LDksMTAsMTMsMTUsMTcsMTRdLCJsYW5ndWFnZSI6InRyIiwibGltaXRzIjp7IjEiOjEwMCwiMiI6MSwiMyI6MSwiNCI6MSwiNSI6MiwiNiI6MSwiNyI6MSwiOCI6MiwiMTUiOjEsIjE3IjoxLCIxOCI6MSwiMjMiOjEsIjI0IjoxLCIyOCI6MSwiMzMiOjEsIjM0IjoxLCIzNiI6MSwiNDAiOjEwLCI0MSI6MSwiNDMiOjEsIjQ0IjoxLCI0NSI6MX0sInNsRmVhdHVyZXMiOnsiODBhYjUyMWQtZTdkZi00YWYxLTgwZDQtYjM1ZjBkYzY5ZTMyIjpbMjAxLDIwMCw0LDUsNTAwLDUwMSwxNiwyMDJdfSwibWZhIjowLCJpYXQiOjE3NzAwNjI0MDAsImV4cCI6MTc3MDE0ODgwMCwiYXVkIjoicHJvZmlxby5teWlrYXMuY29tIiwiaXNzIjoicHJvZmlxby5teWlrYXMuY29tIiwic3ViIjoiY2FuLmt1Y3VrZ3VsdGVraW5AZ21haWwuY29tIn0.sUh3XcH9KcEhdfLbYqEtNIJVROd-qje8xZvvKK6cl48";
+    private const string RefreshTokenQuery = @"
+        mutation refreshToken ($token: String!) {
+            refreshToken (token: $token) {
+                token 
+                tokenExpiry 
+            }
+        }";
+
 
     public IkasOAuthTokenClient(HttpClient http)
     {
         _http = http;
     }
+    public async Task<TokenResult?> RefreshTokenAsync(CancellationToken cancellationToken = default)
+    {
+        var request = new GraphQLRequest
+        {
+            Query = RefreshTokenQuery,
+            Variables = new RefreshTokenVariables { Token = CurrentToken }
+        };
 
+        try
+        {
+            var response = await _http.PostAsJsonAsync(BaseUrl, request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<RefreshTokenResponse>(cancellationToken);
+
+            if (result?.Errors is { Count: > 0 })
+            {
+                return null;
+            }
+
+
+            return result?.Data?.RefreshToken;
+        }
+        catch (Exception ex)
+        {
+            throw;
+        }
+    }
     public async Task<IkasAccessTokenResponse> GetAccessTokenAsync2(string storeName, string clientId,
         string clientSecret, CancellationToken ct)
     {
-      var  text =
-        "{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI1OWM0M2U1LTJjZWEtNDQ3Yi05NWIyLWIyYWRhNWI3YmM4ZSIsImVtYWlsIjoiY2Fua2d0a2luQGdtYWlsLmNvbSIsImZpcnN0TmFtZSI6ImNhbiIsImxhc3ROYW1lIjoia8O8w6fDvGtnw7xsdGVraW4iLCJtZXJjaGFudElkIjoiNzNjNDI0NTUtYjY5ZC00ZDk3LTlmOWMtZjg1N2NkYTllMzVjIiwic3RvcmVOYW1lIjoicHJvZmlxbyIsImltYWdlSWQiOm51bGwsInR5cGUiOjEsImZlYXR1cmVzIjpbXSwibGFuZ3VhZ2UiOiJ0ciIsImxpbWl0cyI6eyIxIjoxMDAsIjIiOjEsIjMiOjEsIjQiOjEsIjUiOjIsIjYiOjEsIjciOjEsIjgiOjIsIjE1IjoxLCIxNyI6MSwiMTgiOjEsIjIzIjoxLCIyNCI6MSwiMjgiOjEsIjMzIjoxLCIzNCI6MSwiMzYiOjEsIjQwIjoxMCwiNDEiOjEsIjQzIjoxLCI0NCI6MSwiNDUiOjF9LCJzbEZlYXR1cmVzIjp7fSwibWZhIjowLCJpYXQiOjE3NzAwNTg2ODYsImV4cCI6MTc3MDE0NTA4NiwiYXVkIjoicHJvZmlxby5teWlrYXMuY29tIiwiaXNzIjoicHJvZmlxby5teWlrYXMuY29tIiwic3ViIjoiY2Fua2d0a2luQGdtYWlsLmNvbSJ9.-DUyHfHkJSOGQqinSzDI-EgSXWpqXF9Q9QjiPx9tXuI\",\"token_type\":\"Bearer\",\"expires_in\":1770145086}";
+        
+        var newtokenData = await RefreshTokenAsync();
+        var newToken = newtokenData.Token;
+        var newTokenExp = newtokenData.TokenExpiry;
+        var newTokenType = "Bearer";
 
+        var tokenResponse = new
+        {
+            access_token = newToken,
+            token_type = newTokenType,
+            expires_in = newTokenExp
+        };
+
+        var text = JsonSerializer.Serialize(tokenResponse);
         try
         {
             var dto = JsonSerializer.Deserialize<IkasAccessTokenResponse>(text);
@@ -78,5 +130,49 @@ internal sealed class IkasOAuthTokenClient : IIkasOAuthTokenClient
         {
             throw new InvalidOperationException($"Ikas oauth token returned invalid JSON: {text}");
         }
+    }
+
+    public sealed class GraphQLRequest
+    {
+        [JsonPropertyName("query")]
+        public required string Query { get; init; }
+
+        [JsonPropertyName("variables")]
+        public required object Variables { get; init; }
+    }
+
+    public sealed class RefreshTokenVariables
+    {
+        [JsonPropertyName("token")]
+        public required string Token { get; init; }
+    }
+
+    public sealed class RefreshTokenResponse
+    {
+        [JsonPropertyName("data")]
+        public RefreshTokenData? Data { get; init; }
+
+        [JsonPropertyName("errors")]
+        public List<GraphQLError>? Errors { get; init; }
+    }
+
+    public sealed class RefreshTokenData
+    {
+        [JsonPropertyName("refreshToken")]
+        public TokenResult? RefreshToken { get; init; }
+    }
+    public sealed class TokenResult
+    {
+        [JsonPropertyName("token")]
+        public string? Token { get; init; }
+
+        [JsonPropertyName("tokenExpiry")]
+        public long? TokenExpiry { get; init; }
+    }
+
+    public sealed class GraphQLError
+    {
+        [JsonPropertyName("message")]
+        public string? Message { get; init; }
     }
 }
