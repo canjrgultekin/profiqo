@@ -4,6 +4,8 @@ using System.Text.Json;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Common.Exceptions;
 
+using static System.Net.Mime.MediaTypeNames;
+
 namespace Profiqo.Infrastructure.Integrations.Ikas;
 
 internal sealed class IkasOAuthTokenClient : IIkasOAuthTokenClient
@@ -15,6 +17,25 @@ internal sealed class IkasOAuthTokenClient : IIkasOAuthTokenClient
         _http = http;
     }
 
+    public async Task<IkasAccessTokenResponse> GetAccessTokenAsync2(string storeName, string clientId,
+        string clientSecret, CancellationToken ct)
+    {
+      var  text =
+        "{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI1OWM0M2U1LTJjZWEtNDQ3Yi05NWIyLWIyYWRhNWI3YmM4ZSIsImVtYWlsIjoiY2Fua2d0a2luQGdtYWlsLmNvbSIsImZpcnN0TmFtZSI6ImNhbiIsImxhc3ROYW1lIjoia8O8w6fDvGtnw7xsdGVraW4iLCJtZXJjaGFudElkIjoiNzNjNDI0NTUtYjY5ZC00ZDk3LTlmOWMtZjg1N2NkYTllMzVjIiwic3RvcmVOYW1lIjoicHJvZmlxbyIsImltYWdlSWQiOm51bGwsInR5cGUiOjEsImZlYXR1cmVzIjpbXSwibGFuZ3VhZ2UiOiJ0ciIsImxpbWl0cyI6eyIxIjoxMDAsIjIiOjEsIjMiOjEsIjQiOjEsIjUiOjIsIjYiOjEsIjciOjEsIjgiOjIsIjE1IjoxLCIxNyI6MSwiMTgiOjEsIjIzIjoxLCIyNCI6MSwiMjgiOjEsIjMzIjoxLCIzNCI6MSwiMzYiOjEsIjQwIjoxMCwiNDEiOjEsIjQzIjoxLCI0NCI6MSwiNDUiOjF9LCJzbEZlYXR1cmVzIjp7fSwibWZhIjowLCJpYXQiOjE3NzAwNTg2ODYsImV4cCI6MTc3MDE0NTA4NiwiYXVkIjoicHJvZmlxby5teWlrYXMuY29tIiwiaXNzIjoicHJvZmlxby5teWlrYXMuY29tIiwic3ViIjoiY2Fua2d0a2luQGdtYWlsLmNvbSJ9.-DUyHfHkJSOGQqinSzDI-EgSXWpqXF9Q9QjiPx9tXuI\",\"token_type\":\"Bearer\",\"expires_in\":1770145086}";
+
+        try
+        {
+            var dto = JsonSerializer.Deserialize<IkasAccessTokenResponse>(text);
+            if (dto is null || string.IsNullOrWhiteSpace(dto.AccessToken))
+                throw new InvalidOperationException("Ikas oauth token response missing access_token.");
+            return dto;
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException($"Ikas oauth token returned invalid JSON: {text}");
+        }
+
+    }
     public async Task<IkasAccessTokenResponse> GetAccessTokenAsync(string storeName, string clientId, string clientSecret, CancellationToken ct)
     {
         storeName = (storeName ?? string.Empty).Trim();
@@ -45,8 +66,7 @@ internal sealed class IkasOAuthTokenClient : IIkasOAuthTokenClient
 
         if (!res.IsSuccessStatusCode)
             throw new ExternalServiceAuthException("ikas", $"Ikas oauth token request failed: HTTP {(int)res.StatusCode}.");
-        //text =
-        //    "{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI1OWM0M2U1LTJjZWEtNDQ3Yi05NWIyLWIyYWRhNWI3YmM4ZSIsImVtYWlsIjoiY2Fua2d0a2luQGdtYWlsLmNvbSIsImZpcnN0TmFtZSI6ImNhbiIsImxhc3ROYW1lIjoia8O8w6fDvGtnw7xsdGVraW4iLCJtZXJjaGFudElkIjoiNzNjNDI0NTUtYjY5ZC00ZDk3LTlmOWMtZjg1N2NkYTllMzVjIiwic3RvcmVOYW1lIjoicHJvZmlxbyIsImltYWdlSWQiOm51bGwsInR5cGUiOjEsImZlYXR1cmVzIjpbXSwibGFuZ3VhZ2UiOiJ0ciIsImxpbWl0cyI6eyIxIjoxMDAsIjIiOjEsIjMiOjEsIjQiOjEsIjUiOjIsIjYiOjEsIjciOjEsIjgiOjIsIjE1IjoxLCIxNyI6MSwiMTgiOjEsIjIzIjoxLCIyNCI6MSwiMjgiOjEsIjMzIjoxLCIzNCI6MSwiMzYiOjEsIjQwIjoxMCwiNDEiOjEsIjQzIjoxLCI0NCI6MSwiNDUiOjF9LCJzbEZlYXR1cmVzIjp7fSwibWZhIjowLCJpYXQiOjE3Njk5ODM1NjMsImV4cCI6MTc3MDA2OTk2MywiYXVkIjoicHJvZmlxby5teWlrYXMuY29tIiwiaXNzIjoicHJvZmlxby5teWlrYXMuY29tIiwic3ViIjoiY2Fua2d0a2luQGdtYWlsLmNvbSJ9.CJ153HOmZba-XQcva47nx44vXeL0_9K7DAW1H90HkQc\",\"token_type\":\"Bearer\",\"expires_in\":1770069963}";
+
         try
         {
             var dto = JsonSerializer.Deserialize<IkasAccessTokenResponse>(text);

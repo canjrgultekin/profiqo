@@ -9,5 +9,7 @@ public sealed record IkasAccessTokenResponse(
 
 public interface IIkasOAuthTokenClient
 {
+    Task<IkasAccessTokenResponse> GetAccessTokenAsync2(string storeName, string clientId, string clientSecret, CancellationToken ct);
+
     Task<IkasAccessTokenResponse> GetAccessTokenAsync(string storeName, string clientId, string clientSecret, CancellationToken ct);
 }

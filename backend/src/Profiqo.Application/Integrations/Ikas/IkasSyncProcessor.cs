@@ -430,7 +430,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
             if (string.IsNullOrWhiteSpace(storeName))
                 throw new InvalidOperationException("Ikas storeName missing on connection.");
 
-            var token = await _oauth.GetAccessTokenAsync(storeName, creds.ClientId, creds.ClientSecret, ct);
+            var token = await _oauth.GetAccessTokenAsync2(storeName, creds.ClientId, creds.ClientSecret, ct);
             return (storeName, token.AccessToken);
         }
 

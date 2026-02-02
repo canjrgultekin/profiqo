@@ -77,7 +77,7 @@ internal sealed class ConnectIkasCommandHandler : IRequestHandler<ConnectIkasCom
                             ["clientSecret"] = new[] { "ClientSecret required." }
                         });
 
-                    var token = await _oauth.GetAccessTokenAsync(storeName, clientId, clientSecret, ct);
+                    var token = await _oauth.GetAccessTokenAsync2(storeName, clientId, clientSecret, ct);
                     _ = await _ikas.MeAsync(storeName, token.AccessToken, ct);
 
                     var credsJson = JsonSerializer.Serialize(new IkasPrivateAppCreds(storeName, clientId, clientSecret));
@@ -101,7 +101,7 @@ internal sealed class ConnectIkasCommandHandler : IRequestHandler<ConnectIkasCom
 
                 if (!string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret))
                 {
-                    var token = await _oauth.GetAccessTokenAsync(storeName, clientId, clientSecret, ct);
+                    var token = await _oauth.GetAccessTokenAsync2(storeName, clientId, clientSecret, ct);
                     _ = await _ikas.MeAsync(storeName, token.AccessToken, ct);
 
                     var credsJson = JsonSerializer.Serialize(new IkasPrivateAppCreds(storeName, clientId, clientSecret));

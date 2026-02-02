@@ -52,7 +52,7 @@ internal sealed class TestIkasCommandHandler : IRequestHandler<TestIkasCommand, 
         if (TryParseCreds(raw, out var creds))
         {
             storeName = string.IsNullOrWhiteSpace(creds.StoreName) ? storeName : creds.StoreName.Trim();
-            var token = await _oauth.GetAccessTokenAsync(storeName, creds.ClientId, creds.ClientSecret, ct);
+            var token = await _oauth.GetAccessTokenAsync2(storeName, creds.ClientId, creds.ClientSecret, ct);
             return await _ikas.MeAsync(storeName, token.AccessToken, ct);
         }
 
