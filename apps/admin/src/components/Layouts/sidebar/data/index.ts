@@ -33,6 +33,12 @@ export const NAV_DATA = [
           { title: "Overview", url: "/integrations" },
           { title: "Ikas", url: "/integrations/ikas" },
           { title: "Trendyol", url: "/integrations/trendyol" },
+		  { title: "WhatsApp", url: "/integrations/whatsapp" },
+		  { title: "WhatsApp Templates", url: "/integrations/whatsapp/templates" },
+		  { title: "WhatsApp Rules", url: "/integrations/whatsapp/rules" },
+		  { title: "WhatsApp Jobs", url: "/integrations/whatsapp/jobs" },
+		  { title: "WhatsApp Dispatch", url: "/integrations/whatsapp/dispatch" },
+
         ],
       },
 	  {

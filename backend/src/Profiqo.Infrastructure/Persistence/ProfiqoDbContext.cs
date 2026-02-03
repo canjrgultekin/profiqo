@@ -35,6 +35,12 @@ public sealed class ProfiqoDbContext : DbContext
     public DbSet<IntegrationCursor> IntegrationCursors => Set<IntegrationCursor>();
     public DbSet<IntegrationJob> IntegrationJobs => Set<IntegrationJob>();
 
+    // WhatsApp automation tables (EF mapped)
+    public DbSet<WhatsappRuleRow> WhatsappRules => Set<WhatsappRuleRow>();
+    public DbSet<WhatsappJobRow> WhatsappJobs => Set<WhatsappJobRow>();
+    public DbSet<WhatsappDispatchQueueRow> WhatsappDispatchQueue => Set<WhatsappDispatchQueueRow>();
+    public DbSet<WhatsappOrderEventRow> WhatsappOrderEvents => Set<WhatsappOrderEventRow>();
+
     public ProfiqoDbContext(DbContextOptions<ProfiqoDbContext> options, ITenantContext tenantContext)
         : base(options)
     {
@@ -58,11 +64,9 @@ public sealed class ProfiqoDbContext : DbContext
         modelBuilder.Entity<IngestionEvent>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<IntegrationCursor>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
 
-        // ✅ NEW: merge tables
         modelBuilder.Entity<CustomerMergeLink>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
         modelBuilder.Entity<CustomerMergeDecision>().HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value);
 
-        // ✅ Suggestions entity uses Guid tenant_id (legacy), scope it
         modelBuilder.Entity<CustomerMergeSuggestion>()
             .HasQueryFilter(x => CurrentTenantId != null && x.TenantId == CurrentTenantId.Value.Value);
 
@@ -71,6 +75,9 @@ public sealed class ProfiqoDbContext : DbContext
             b.HasNoKey();
             b.ToView(null);
         });
+
+        // WhatsApp automation mappings
+        Profiqo.Infrastructure.Persistence.Configurations.WhatsappAutomationConfigurations.Configure(modelBuilder);
 
         base.OnModelCreating(modelBuilder);
     }

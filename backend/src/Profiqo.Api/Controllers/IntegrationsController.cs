@@ -60,6 +60,36 @@ public sealed class IntegrationsController : ControllerBase
                 healthy = ikas.Status == ProviderConnectionStatus.Active
             });
         }
+        var trendyol = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Trendyol, ct);
+        if (trendyol is not null)
+        {
+            result.Add(new
+            {
+                provider = "trendyol",
+                connectionId = trendyol.Id.Value,
+                status = trendyol.Status.ToString(),
+                displayName = trendyol.DisplayName,
+                externalAccountId = trendyol.ExternalAccountId,
+                cursors = (object?)null,
+                healthy = trendyol.Status == ProviderConnectionStatus.Active
+            });
+        }
+
+        var whatsapp = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Whatsapp, ct);
+        if (whatsapp is not null)
+        {
+            result.Add(new
+            {
+                provider = "whatsapp",
+                connectionId = whatsapp.Id.Value,
+                status = whatsapp.Status.ToString(),
+                displayName = whatsapp.DisplayName,
+                externalAccountId = whatsapp.ExternalAccountId,
+                cursors = (object?)null,
+                healthy = whatsapp.Status == ProviderConnectionStatus.Active
+            });
+        }
+
 
         return Ok(new { items = result });
     }

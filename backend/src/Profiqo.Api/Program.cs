@@ -25,6 +25,7 @@ using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Security;
 using Profiqo.Application.Abstractions.Tenancy;
 using Profiqo.Infrastructure.Integrations.Ikas;
+using Profiqo.Infrastructure.Integrations.Whatsapp;
 using Profiqo.Infrastructure.Persistence;
 
 using Serilog;
@@ -79,6 +80,7 @@ builder.Services.AddScoped<CorrelationIdMiddleware>();
 builder.Services.AddProfiqoApplication();
 builder.Services.AddProfiqoPersistence(builder.Configuration);
 builder.Services.AddIkasIntegration(builder.Configuration);
+builder.Services.AddWhatsappIntegration(builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

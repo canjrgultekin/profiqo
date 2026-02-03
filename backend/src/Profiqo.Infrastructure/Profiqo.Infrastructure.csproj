@@ -1,6 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Remove="Integrations\Whatsapp\WhatsappGraphApiClient.cs" />
+    <Compile Remove="Persistence\Configurations\WhatsappSendJobConfiguration.cs" />
+    <Compile Remove="Persistence\Configurations\WhatsappTemplateConfiguration.cs" />
+    <Compile Remove="Persistence\Entities\WhatsappSendJob.cs" />
+    <Compile Remove="Persistence\Entities\WhatsappTemplateDraftRow.cs" />
+    <Compile Remove="Persistence\Repositories\WhatsappSendJobRepository.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Confluent.Kafka" Version="2.13.0" />
     <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
     <PackageReference Include="FluentValidation" Version="12.1.1" />

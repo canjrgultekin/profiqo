@@ -30,6 +30,9 @@ internal sealed class ProviderConnectionConfiguration : IEntityTypeConfiguration
         builder.Property(x => x.ExternalAccountId).HasMaxLength(200);
 
         builder.Property(x => x.AccessTokenExpiresAtUtc).HasColumnName("access_token_expires_at_utc");
+        builder.Property(x => x.IsTestMode)
+            .HasColumnName("is_test_mode")
+            .IsRequired();
 
         builder.HasIndex(x => new { x.TenantId, x.ProviderType }).IsUnique();
 

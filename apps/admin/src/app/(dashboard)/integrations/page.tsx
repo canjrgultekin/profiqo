@@ -48,6 +48,8 @@ export default function IntegrationsHubPage() {
   }, []);
 
   const ikas = items.find((x) => x.provider === "ikas");
+  const trendyol = items.find((x) => x.provider === "trendyol");
+  const whatsapp = items.find((x) => x.provider === "whatsapp");
 
   return (
     <div className="p-4 sm:p-6">
@@ -80,20 +82,37 @@ export default function IntegrationsHubPage() {
           </div>
         </button>
 
-        <button
-          onClick={() => alert("Trendyol connector coming soon.")}
-          className="rounded-[10px] border border-stroke bg-white p-4 text-left shadow-1 hover:border-primary dark:border-dark-3 dark:bg-gray-dark dark:shadow-card"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-lg font-semibold text-dark dark:text-white">Trendyol</div>
-            <div className="text-xs px-2 py-1 rounded bg-yellow-500/20 text-yellow-700">
-              Coming soon
-            </div>
-          </div>
-          <div className="mt-2 text-sm text-body-color dark:text-dark-6">
-            Marketplace connector
-          </div>
-        </button>
+		<button
+		  onClick={() => router.push("/integrations/trendyol")}
+		  className="rounded-[10px] border border-stroke bg-white p-4 text-left shadow-1 hover:border-primary dark:border-dark-3 dark:bg-gray-dark dark:shadow-card"
+		>
+		  <div className="flex items-center justify-between">
+			<div className="text-lg font-semibold text-dark dark:text-white">Trendyol</div>
+			<div className={`text-xs px-2 py-1 rounded ${trendyol?.healthy ? "bg-green-500/20 text-green-700" : "bg-gray-500/20 text-gray-700"}`}>
+			  {trendyol?.healthy ? "Connected" : "Not connected"}
+			</div>
+		  </div>
+		  <div className="mt-2 text-sm text-body-color dark:text-dark-6">Marketplace connector</div>
+		</button>
+
+		<button
+		  onClick={() => router.push("/integrations/whatsapp")}
+		  className="rounded-[10px] border border-stroke bg-white p-4 text-left shadow-1 hover:border-primary dark:border-dark-3 dark:bg-gray-dark dark:shadow-card"
+		>
+		  <div className="flex items-center justify-between">
+			<div className="text-lg font-semibold text-dark dark:text-white">WhatsApp Push</div>
+			<div className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-700">
+			  Local mode
+			</div>
+		  </div>
+		  <div className="mt-2 text-sm text-body-color dark:text-dark-6">
+			Templates + Rules + Jobs + Dummy send
+		  </div>
+		</button>
+
+
+
+
       </div>
 
       <div className="mt-6 rounded-[10px] bg-white p-4 shadow-1 dark:bg-gray-dark dark:shadow-card">

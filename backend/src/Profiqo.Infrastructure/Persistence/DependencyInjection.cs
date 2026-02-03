@@ -74,6 +74,19 @@ public static class DependencyInjection
 
         // ✅ NEW: suggestions repository
         services.AddScoped<ICustomerMergeSuggestionRepository, CustomerMergeSuggestionRepository>();
+        // WhatsApp templates (DB table üzerinden SQL repo)
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.Whatsapp.IWhatsappTemplateRepository,
+            Profiqo.Infrastructure.Persistence.Repositories.WhatsappTemplateRepository>();
+
+        // WhatsApp automation
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappTemplateDraftRepository,
+            Profiqo.Infrastructure.Persistence.Repositories.WhatsappTemplateDraftRepository>();
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappRuleRepository,
+            Profiqo.Infrastructure.Persistence.Repositories.WhatsappRuleRepository>();
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappJobRepository,
+            Profiqo.Infrastructure.Persistence.Repositories.WhatsappJobRepository>();
+        services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappDispatchRepository,
+            Profiqo.Infrastructure.Persistence.Repositories.WhatsappDispatchRepository>();
 
         return services;
     }

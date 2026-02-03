@@ -6,4 +6,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="Common\Ids\WhatsappTemplateId.cs" />
+    <Compile Remove="Integrations\Whatsapp\WhatsappTemplate.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Integrations\Whatsapp\" />
+  </ItemGroup>
+
 </Project>

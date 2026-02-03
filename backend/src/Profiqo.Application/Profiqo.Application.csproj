@@ -3,10 +3,36 @@
   <ItemGroup>
     <Compile Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
     <Compile Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <Compile Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <Compile Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <Compile Remove="Integrations\Whatsapp\Messages\**" />
+    <Compile Remove="Integrations\Whatsapp\Templates\**" />
     <EmbeddedResource Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
     <EmbeddedResource Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Messages\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Templates\**" />
     <None Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
     <None Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <None Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <None Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <None Remove="Integrations\Whatsapp\Messages\**" />
+    <None Remove="Integrations\Whatsapp\Templates\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Abstractions\Integrations\Whatsapp\IWhatsappGraphApiClient.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappOptions.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappPhoneNumberInfo.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappTemplateRemoteItem.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\IWhatsappSendJobRepository.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobClaimDto.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobCreateRequest.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobDto.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobStatus.cs" />
+    <Compile Remove="Integrations\Whatsapp\WhatsappConnectionSecret.cs" />
+    <Compile Remove="Integrations\Whatsapp\WhatsappTemplateNameNormalizer.cs" />
   </ItemGroup>
 
   <ItemGroup>

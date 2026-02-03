@@ -17,6 +17,8 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
     public EncryptedSecret? RefreshToken { get; private set; }
     public DateTimeOffset? AccessTokenExpiresAtUtc { get; private set; }
 
+    public bool IsTestMode { get; private set; } // ✅ NEW
+
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
@@ -36,6 +38,7 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
         EncryptedSecret accessToken,
         EncryptedSecret? refreshToken,
         DateTimeOffset? accessTokenExpiresAtUtc,
+        bool isTestMode,
         DateTimeOffset nowUtc) : base(id)
     {
         TenantId = tenantId;
@@ -46,11 +49,14 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
 
         ExternalAccountId = externalAccountId is null
             ? null
-            : Guard.AgainstTooLong(Guard.AgainstNullOrWhiteSpace(externalAccountId, nameof(externalAccountId)), 200, nameof(externalAccountId));
+            : Guard.AgainstTooLong(
+                Guard.AgainstNullOrWhiteSpace(externalAccountId, nameof(externalAccountId)), 200, nameof(externalAccountId));
 
         AccessToken = accessToken;
         RefreshToken = refreshToken;
         AccessTokenExpiresAtUtc = accessTokenExpiresAtUtc?.ToUniversalTime();
+
+        IsTestMode = isTestMode;
 
         Status = ProviderConnectionStatus.Active;
 
@@ -66,7 +72,8 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
         EncryptedSecret accessToken,
         EncryptedSecret? refreshToken,
         DateTimeOffset? accessTokenExpiresAtUtc,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        bool isTestMode = false) // ✅ default, callsites bozulmaz
     {
         return new ProviderConnection(
             ProviderConnectionId.New(),
@@ -77,6 +84,7 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
             accessToken,
             refreshToken,
             accessTokenExpiresAtUtc,
+            isTestMode,
             nowUtc);
     }
 
@@ -127,16 +135,10 @@ public sealed class ProviderConnection : AggregateRoot<ProviderConnectionId>
         Touch(nowUtc);
     }
 
-    public void UpdateTokens(
-        string displayName,
-        string? externalAccountId,
-        EncryptedSecret accessToken,
-        EncryptedSecret? refreshToken,
-        DateTimeOffset? accessTokenExpiresAtUtc,
-        DateTimeOffset nowUtc)
+    public void SetTestMode(bool isTestMode, DateTimeOffset nowUtc) // ✅ NEW
     {
-        UpdateProfile(displayName, externalAccountId, nowUtc);
-        RotateTokens(accessToken, refreshToken, accessTokenExpiresAtUtc, nowUtc);
+        IsTestMode = isTestMode;
+        Touch(nowUtc);
     }
 
     private void Touch(DateTimeOffset nowUtc)
