@@ -3,9 +3,9 @@ import * as Icons from "../icons";
 
 export const NAV_DATA = [
   {
-    label: "MAIN MENU",
+    label: "Profiqo.io",
     items: [
-      { title: "Dashboard", icon: Icons.HomeIcon, items: [{ title: "eCommerce", url: "/" }] },
+      { title: "Ana Menü", icon: Icons.HomeIcon, items: [{ title: "Dashboard", url: "/" }] },
 
       // ✅ Customers altına Identity Analyze eklendi
       {

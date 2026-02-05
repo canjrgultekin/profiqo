@@ -30,7 +30,7 @@ public sealed class ReportsController : ControllerBase
         if (tenantId is null) return BadRequest(new { message = "Tenant context missing." });
 
         var now = DateTimeOffset.UtcNow;
-        var since30 = now.AddDays(-30);
+        var since120 = now.AddDays(-120);
 
         var links = _db.Set<CustomerMergeLink>().AsNoTracking()
             .Where(x => x.TenantId == tenantId.Value);
@@ -54,24 +54,24 @@ public sealed class ReportsController : ControllerBase
         var activeCustomers30 = await customerCanonicals
             .GroupBy(x => x.canonicalCustomerId)
             .Select(g => new { lastSeenAtUtc = g.Max(x => x.LastSeenAtUtc) })
-            .CountAsync(x => x.lastSeenAtUtc >= since30, ct);
+            .CountAsync(x => x.lastSeenAtUtc >= since120, ct);
 
         var totalOrders30 = await _db.Orders.AsNoTracking()
-            .CountAsync(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since30, ct);
+            .CountAsync(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since120, ct);
 
         var grossRevenue30 = await _db.Orders.AsNoTracking()
-            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since30)
+            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since120)
             .Select(x => x.TotalAmount.Amount)
             .SumAsync(ct);
 
         var netProfit30 = await _db.Orders.AsNoTracking()
-            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since30)
+            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since120)
             .Select(x => x.NetProfit.Amount)
             .SumAsync(ct);
 
         return Ok(new
         {
-            windowDays = 30,
+            windowDays = 120,
             totalCustomers,
             activeCustomers30,
             totalOrders30,
@@ -87,10 +87,10 @@ public sealed class ReportsController : ControllerBase
         var tenantId = _tenant.CurrentTenantId;
         if (tenantId is null) return BadRequest(new { message = "Tenant context missing." });
 
-        var since30 = DateTimeOffset.UtcNow.AddDays(-30);
+        var since120 = DateTimeOffset.UtcNow.AddDays(-120);
 
         var rows = await _db.Orders.AsNoTracking()
-            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since30)
+            .Where(x => x.TenantId == tenantId.Value && x.PlacedAtUtc >= since120)
             .GroupBy(x => x.Channel)
             .Select(g => new
             {
@@ -102,6 +102,6 @@ public sealed class ReportsController : ControllerBase
             .OrderByDescending(x => x.orders)
             .ToListAsync(ct);
 
-        return Ok(new { windowDays = 30, currency = "TRY", items = rows });
+        return Ok(new { windowDays = 120, currency = "TRY", items = rows });
     }
 }
