@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 
-const ACCESS_COOKIE = "profiqo_access_token";
-const REFRESH_COOKIE = "profiqo_refresh_token";
-const TENANT_COOKIE = "profiqo_tenant_id";
-const USER_COOKIE = "profiqo_user_id";
+const COOKIES_TO_CLEAR = [
+  "profiqo_access_token",
+  "profiqo_refresh_token",
+  "profiqo_tenant_id",
+  "profiqo_user_id",
+  "profiqo_roles",
+  "profiqo_display_name",
+  "profiqo_email",
+];
 
 export async function POST() {
   const res = NextResponse.json({ ok: true });
 
-  res.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0 });
-  res.cookies.set(REFRESH_COOKIE, "", { path: "/", maxAge: 0 });
-  res.cookies.set(TENANT_COOKIE, "", { path: "/", maxAge: 0 });
-  res.cookies.set(USER_COOKIE, "", { path: "/", maxAge: 0 });
+  for (const name of COOKIES_TO_CLEAR) {
+    res.cookies.set(name, "", { path: "/", maxAge: 0 });
+  }
 
   return res;
 }

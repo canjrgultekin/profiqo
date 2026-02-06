@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 const ACCESS_COOKIE = "profiqo_access_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
 const ROLES_COOKIE = "profiqo_roles";
+const DISPLAY_NAME_COOKIE = "profiqo_display_name";
+const EMAIL_COOKIE = "profiqo_email";
+const USER_COOKIE = "profiqo_user_id";
 
 function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/auth")) return true;
@@ -43,9 +46,17 @@ function isJwtExpired(token: string): boolean {
 }
 
 function clearAuth(res: NextResponse) {
-  res.cookies.set(ACCESS_COOKIE, "", { path: "/", maxAge: 0 });
-  res.cookies.set(TENANT_COOKIE, "", { path: "/", maxAge: 0 });
-  res.cookies.set(ROLES_COOKIE, "", { path: "/", maxAge: 0 });
+  const cookiesToClear = [
+    ACCESS_COOKIE,
+    TENANT_COOKIE,
+    ROLES_COOKIE,
+    DISPLAY_NAME_COOKIE,
+    EMAIL_COOKIE,
+    USER_COOKIE,
+  ];
+  for (const name of cookiesToClear) {
+    res.cookies.set(name, "", { path: "/", maxAge: 0 });
+  }
 }
 
 function redirectToSignIn(req: NextRequest) {

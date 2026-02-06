@@ -9,36 +9,16 @@ type RegisterRequest = {
   remember?: boolean;
 };
 
-type BackendRegisterResponse = {
-  accessToken?: string;
-  token?: string;
-  jwt?: string;
-
-  refreshToken?: string;
-
-  expiresAtUtc?: string;
-  accessTokenExpiresAtUtc?: string;
-
-  tenantId?: string;
-  userId?: string;
-  roles?: string[] | number[];
-};
-
 const ACCESS_COOKIE = "profiqo_access_token";
 const REFRESH_COOKIE = "profiqo_refresh_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
 const USER_COOKIE = "profiqo_user_id";
+const ROLES_COOKIE = "profiqo_roles";
+const DISPLAY_NAME_COOKIE = "profiqo_display_name";
+const EMAIL_COOKIE = "profiqo_email";
 
 function backendBaseUrl(): string {
   return process.env.PROFIQO_BACKEND_URL?.trim() || "http://localhost:5164";
-}
-
-function parseExpiryDate(payload: BackendRegisterResponse): Date | null {
-  const raw = payload.expiresAtUtc || payload.accessTokenExpiresAtUtc;
-  if (!raw) return null;
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
 }
 
 async function safeReadJson(res: Response): Promise<any> {
@@ -49,6 +29,70 @@ async function safeReadJson(res: Response): Promise<any> {
   } catch {
     return { message: text };
   }
+}
+
+function pickAccessToken(payload: any): string | null {
+  return (
+    payload?.tokens?.accessToken ||
+    payload?.tokens?.token ||
+    payload?.accessToken ||
+    payload?.token ||
+    payload?.jwt ||
+    payload?.Tokens?.AccessToken ||
+    payload?.Tokens?.Token ||
+    payload?.AccessToken ||
+    payload?.Token ||
+    payload?.Jwt ||
+    null
+  );
+}
+
+function pickExpiresAt(payload: any): Date | null {
+  const raw =
+    payload?.tokens?.accessTokenExpiresAtUtc ||
+    payload?.accessTokenExpiresAtUtc ||
+    payload?.expiresAtUtc ||
+    payload?.Tokens?.AccessTokenExpiresAtUtc ||
+    payload?.AccessTokenExpiresAtUtc ||
+    payload?.ExpiresAtUtc;
+
+  if (!raw) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function pickUserInfo(payload: any): {
+  tenantId: string | null;
+  userId: string | null;
+  roles: any;
+  displayName: string | null;
+  email: string | null;
+} {
+  const u = payload?.user || payload?.User || null;
+
+  return {
+    tenantId: u?.tenantId || u?.TenantId || payload?.tenantId || payload?.TenantId || null,
+    userId: u?.userId || u?.UserId || payload?.userId || payload?.UserId || null,
+    roles: u?.roles || u?.Roles || payload?.roles || payload?.Roles || null,
+    displayName: u?.displayName || u?.DisplayName || payload?.displayName || payload?.DisplayName || null,
+    email: u?.email || u?.Email || payload?.email || payload?.Email || null,
+  };
+}
+
+function normalizeRolesToString(roles: any): string | null {
+  if (!roles) return null;
+  const roleMap: Record<string, string> = { "1": "Owner", "2": "Admin", "3": "Reporting", "4": "Integration" };
+  const names = ["Owner", "Admin", "Reporting", "Integration"];
+  const out: string[] = [];
+
+  const arr = Array.isArray(roles) ? roles : [roles];
+  for (const r of arr) {
+    const s = String(r).trim();
+    if (names.includes(s)) out.push(s);
+    else if (roleMap[s]) out.push(roleMap[s]);
+  }
+
+  return [...new Set(out)].join(",") || null;
 }
 
 export async function POST(req: Request) {
@@ -68,7 +112,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // Backend’in beklediği net payload
   const upstreamBody = {
     tenantName,
     tenantSlug,
@@ -91,89 +134,79 @@ export async function POST(req: Request) {
     );
   }
 
-  const payload = (await safeReadJson(upstream)) as BackendRegisterResponse | any;
+  const payload = await safeReadJson(upstream);
 
   if (!upstream.ok) {
-    // Backend validation detail’i varsa UI’da göster
-    const msg =
-      payload?.message ||
-      payload?.title ||
-      payload?.detail ||
-      "Register başarısız.";
+    const msg = payload?.message || payload?.title || payload?.detail || "Register başarısız.";
     return NextResponse.json(
       { ok: false, message: msg, errors: payload?.errors ?? payload?.extensions?.errors ?? null },
       { status: upstream.status }
     );
   }
 
-  const accessToken = payload?.accessToken || payload?.token || payload?.jwt;
-  const refreshToken = payload?.refreshToken;
+  const accessToken = pickAccessToken(payload);
+  const expiresAt = pickExpiresAt(payload);
+  const { tenantId, userId, roles, displayName: respDisplayName, email: respEmail } = pickUserInfo(payload);
 
   const isProd = process.env.NODE_ENV === "production";
+  const longMaxAge = 30 * 24 * 60 * 60;
+
   const res = NextResponse.json({
     ok: true,
-    tenantId: payload?.tenantId ?? null,
-    userId: payload?.userId ?? null,
-    roles: payload?.roles ?? null,
+    tenantId,
+    userId,
+    roles,
     hasTokens: Boolean(accessToken),
   });
 
   if (accessToken) {
-    const expiresAt = parseExpiryDate(payload);
-
     if (expiresAt) {
       res.cookies.set(ACCESS_COOKIE, accessToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        expires: expiresAt,
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", expires: expiresAt,
       });
     } else {
       res.cookies.set(ACCESS_COOKIE, accessToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60,
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 60 * 60,
       });
     }
 
-    if (remember && refreshToken) {
-      res.cookies.set(REFRESH_COOKIE, refreshToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60,
-      });
-    } else {
+    if (!remember) {
       res.cookies.set(REFRESH_COOKIE, "", {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 0,
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 0,
       });
     }
 
-    if (payload?.tenantId) {
-      res.cookies.set(TENANT_COOKIE, payload.tenantId, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60,
+    if (tenantId) {
+      res.cookies.set(TENANT_COOKIE, tenantId, {
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
       });
     }
 
-    if (payload?.userId) {
-      res.cookies.set(USER_COOKIE, payload.userId, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 30 * 24 * 60 * 60,
+    if (userId) {
+      res.cookies.set(USER_COOKIE, userId, {
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
+      });
+    }
+
+    // User display info cookies
+    const nameToStore = respDisplayName || displayName || email.split("@")[0];
+    if (nameToStore) {
+      res.cookies.set(DISPLAY_NAME_COOKIE, nameToStore, {
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
+      });
+    }
+
+    const emailToStore = respEmail || email;
+    if (emailToStore) {
+      res.cookies.set(EMAIL_COOKIE, emailToStore, {
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
+      });
+    }
+
+    const rolesStr = normalizeRolesToString(roles);
+    if (rolesStr) {
+      res.cookies.set(ROLES_COOKIE, rolesStr, {
+        httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
       });
     }
   }

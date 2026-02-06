@@ -13,6 +13,8 @@ const REFRESH_COOKIE = "profiqo_refresh_token";
 const TENANT_COOKIE = "profiqo_tenant_id";
 const USER_COOKIE = "profiqo_user_id";
 const ROLES_COOKIE = "profiqo_roles";
+const DISPLAY_NAME_COOKIE = "profiqo_display_name";
+const EMAIL_COOKIE = "profiqo_email";
 
 function backendBaseUrl(): string {
   return process.env.PROFIQO_BACKEND_URL?.trim() || "http://localhost:5164";
@@ -60,26 +62,30 @@ function pickExpiresAt(payload: any): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function pickUserInfo(payload: any): { tenantId: string | null; userId: string | null; roles: any } {
+function pickUserInfo(payload: any): {
+  tenantId: string | null;
+  userId: string | null;
+  roles: any;
+  displayName: string | null;
+  email: string | null;
+} {
   const u = payload?.user || payload?.User || null;
 
   const tenantId =
-    u?.tenantId ||
-    u?.TenantId ||
-    payload?.tenantId ||
-    payload?.TenantId ||
-    null;
+    u?.tenantId || u?.TenantId || payload?.tenantId || payload?.TenantId || null;
 
   const userId =
-    u?.userId ||
-    u?.UserId ||
-    payload?.userId ||
-    payload?.UserId ||
-    null;
+    u?.userId || u?.UserId || payload?.userId || payload?.UserId || null;
 
   const roles = u?.roles || u?.Roles || payload?.roles || payload?.Roles || null;
 
-  return { tenantId, userId, roles };
+  const displayName =
+    u?.displayName || u?.DisplayName || payload?.displayName || payload?.DisplayName || null;
+
+  const email =
+    u?.email || u?.Email || payload?.email || payload?.Email || null;
+
+  return { tenantId, userId, roles, displayName, email };
 }
 
 // Map numeric role codes -> names
@@ -103,13 +109,11 @@ function normalizeRolesToString(roles: any): string | null {
       const s = String(r).trim();
       if (!s) continue;
 
-      // already a name?
       if (["Owner", "Admin", "Reporting", "Integration"].includes(s)) {
         out.push(s);
         continue;
       }
 
-      // numeric?
       const mapped = roleNameFromCode(s);
       if (mapped) out.push(mapped);
     }
@@ -126,8 +130,6 @@ function normalizeRolesToString(roles: any): string | null {
   return distinct.length ? distinct.join(",") : null;
 }
 
-// Try extract roles from JWT payload if backend didn't return roles.
-// This is only for UI gating; signature verification isn't required here.
 function tryGetRolesFromJwt(accessToken: string): string | null {
   try {
     const parts = accessToken.split(".");
@@ -141,7 +143,6 @@ function tryGetRolesFromJwt(accessToken: string): string | null {
     const json = Buffer.from(payloadB64, "base64").toString("utf8");
     const payload = JSON.parse(json);
 
-    // common claims patterns
     const candidates =
       payload?.roles ??
       payload?.role ??
@@ -209,10 +210,12 @@ export async function POST(req: Request) {
   }
 
   const expiresAt = pickExpiresAt(payload);
-  const { tenantId, userId, roles } = pickUserInfo(payload);
+  const { tenantId, userId, roles, displayName, email: userEmail } = pickUserInfo(payload);
 
   const isProd = process.env.NODE_ENV === "production";
   const res = NextResponse.json({ ok: true, tenantId, userId, roles });
+
+  const longMaxAge = 30 * 24 * 60 * 60;
 
   // Access token cookie
   if (expiresAt) {
@@ -236,21 +239,26 @@ export async function POST(req: Request) {
   // Tenant/User cookies
   if (tenantId) {
     res.cookies.set(TENANT_COOKIE, tenantId, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 30 * 24 * 60 * 60,
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
     });
   }
 
   if (userId) {
     res.cookies.set(USER_COOKIE, userId, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 30 * 24 * 60 * 60,
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
+    });
+  }
+
+  // User display info cookies
+  if (displayName) {
+    res.cookies.set(DISPLAY_NAME_COOKIE, displayName, {
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
+    });
+  }
+
+  if (userEmail) {
+    res.cookies.set(EMAIL_COOKIE, userEmail, {
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
     });
   }
 
@@ -262,35 +270,21 @@ export async function POST(req: Request) {
 
   if (rolesStr) {
     res.cookies.set(ROLES_COOKIE, rolesStr, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 30 * 24 * 60 * 60,
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: longMaxAge,
     });
   } else {
-    // clear to avoid stale RBAC
     res.cookies.set(ROLES_COOKIE, "", {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 0,
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 0,
     });
   }
 
-  // Refresh token handling (backend may not return; if remember false clear)
+  // Refresh token handling
   if (!remember) {
     res.cookies.set(REFRESH_COOKIE, "", {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 0,
+      httpOnly: true, secure: isProd, sameSite: "lax", path: "/", maxAge: 0,
     });
   }
 
-  // keep Next 16 async cookies API happy
   await cookies();
 
   return res;

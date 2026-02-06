@@ -47,7 +47,9 @@ internal sealed class TenantUserRepository : ITenantUserRepository
 
     public Task<User?> GetByTenantAndIdAsync(TenantId tenantId, Guid userId, CancellationToken ct)
     {
-        return _db.Users.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id.Value == userId, ct);
+        var uid = new UserId(userId);
+
+        return _db.Users.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == uid, ct);
     }
 
     public Task AddAsync(User user, CancellationToken ct)

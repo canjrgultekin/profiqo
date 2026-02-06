@@ -25,21 +25,17 @@ export function Header() {
       {isMobile && (
         <Link href={"/"} className="ml-2 max-[430px]:hidden min-[375px]:ml-4">
           <Image
-            src={"/images/logo/logo-icon.svg"}
+            src="/images/logo/profiqo-icon.png"
             width={32}
             height={32}
-            alt=""
+            alt="Profiqo"
             role="presentation"
           />
         </Link>
       )}
 
-      <div className="max-xl:hidden">
-        <h1 className="mb-0.5 text-heading-5 font-bold text-dark dark:text-white">
-          Dashboard
-        </h1>
-        <p className="font-medium">Next.js Admin Dashboard Solution</p>
-      </div>
+      {/* Left spacer - logo/title area removed */}
+      <div className="max-xl:hidden" />
 
       <div className="flex flex-1 items-center justify-end gap-2 min-[375px]:gap-4">
         <div className="relative w-full max-w-[300px]">
