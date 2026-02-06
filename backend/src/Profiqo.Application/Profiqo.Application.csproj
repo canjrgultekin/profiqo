@@ -1,6 +1,69 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
+    <Compile Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <Compile Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <Compile Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <Compile Remove="Integrations\Whatsapp\Messages\**" />
+    <Compile Remove="Integrations\Whatsapp\Templates\**" />
+    <EmbeddedResource Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
+    <EmbeddedResource Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Messages\**" />
+    <EmbeddedResource Remove="Integrations\Whatsapp\Templates\**" />
+    <None Remove="Integrations\Ikas\Commands\SyncIkasCustomers\**" />
+    <None Remove="Integrations\Ikas\Commands\SyncIkasOrders\**" />
+    <None Remove="Integrations\Whatsapp\Commands\ConnectWhatsapp\**" />
+    <None Remove="Integrations\Whatsapp\Commands\TestWhatsapp\**" />
+    <None Remove="Integrations\Whatsapp\Messages\**" />
+    <None Remove="Integrations\Whatsapp\Templates\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Abstractions\Integrations\Whatsapp\IWhatsappGraphApiClient.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappOptions.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappPhoneNumberInfo.cs" />
+    <Compile Remove="Abstractions\Integrations\Whatsapp\WhatsappTemplateRemoteItem.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\IWhatsappSendJobRepository.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobClaimDto.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobCreateRequest.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobDto.cs" />
+    <Compile Remove="Abstractions\Persistence\Whatsapp\WhatsappSendJobStatus.cs" />
+    <Compile Remove="Integrations\Whatsapp\WhatsappConnectionSecret.cs" />
+    <Compile Remove="Integrations\Whatsapp\WhatsappTemplateNameNormalizer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.13.0" />
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+    <PackageReference Include="MediatR" Version="14.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.2" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
+    <PackageReference Include="Serilog" Version="4.3.1-dev-02404" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1-dev-02330" />
+    <PackageReference Include="Serilog.Sinks.File" Version="8.0.0-dev-02318" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Profiqo.Domain\Profiqo.Domain.csproj" />
   </ItemGroup>
 
