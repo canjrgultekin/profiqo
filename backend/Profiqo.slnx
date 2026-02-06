@@ -5,7 +5,9 @@
     <Project Path="src/Profiqo.Contracts/Profiqo.Contracts.csproj" />
     <Project Path="src/Profiqo.Domain/Profiqo.Domain.csproj" />
     <Project Path="src/Profiqo.Infrastructure/Profiqo.Infrastructure.csproj" />
-    <Project Path="src/Profiqo.Whatsapp.Automation.Worker/Profiqo.Whatsapp.Automation.Worker.csproj" Id="fcb7aa1e-f177-416b-a11b-6c70d1501761" />
+    <Project Path="src/Profiqo.Whatsapp.Automation.Worker/Profiqo.Whatsapp.Automation.Worker.csproj" Id="fcb7aa1e-f177-416b-a11b-6c70d1501761">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
     <Project Path="src/Profiqo.Worker/Profiqo.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
