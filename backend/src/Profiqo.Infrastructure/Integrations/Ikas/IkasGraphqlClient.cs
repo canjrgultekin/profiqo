@@ -243,7 +243,7 @@ query listOrder(
                         "REFUND_REQUESTED"
                     }
                 },
-                updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
+           //     updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
             }
         };
 

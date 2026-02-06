@@ -19,28 +19,74 @@ const channelIcons: Record<string, string> = { Ikas: "🛒", Trendyol: "🟠", S
 function fmtDate(s: string) { try { return new Date(s).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { return s; } }
 function fmtMoney(m: MoneyDto) { return `${m.amount.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${m.currency}`; }
 
+// Ikas ve Trendyol adres formatlarını normalize eden helper
+// Ikas: { city: { name: "İstanbul" }, district: { name: "Kadıköy" }, country: { name: "Türkiye" }, firstName, lastName, ... }
+// Trendyol: { city: "İstanbul", district: "Şişli", country: "TR", fullName: "...", ... }
+function normalizeAddress(addr: any): { fullName?: string; addressLine1?: string; addressLine2?: string; district?: string; city?: string; postalCode?: string; country?: string; phone?: string } | null {
+  if (!addr) return null;
+  
+  // Field'ı normalize et: object ise .name al, string ise direkt kullan
+  const extractField = (field: any): string | undefined => {
+    if (!field) return undefined;
+    if (typeof field === "string") return field;
+    if (typeof field === "object" && field.name) return field.name;
+    return undefined;
+  };
+
+  // fullName: Trendyol'da fullName var, Ikas'ta firstName + lastName
+  let fullName = addr.fullName;
+  if (!fullName && (addr.firstName || addr.lastName)) {
+    fullName = [addr.firstName, addr.lastName].filter(Boolean).join(" ");
+  }
+
+  return {
+    fullName,
+    addressLine1: addr.addressLine1,
+    addressLine2: addr.addressLine2,
+    district: extractField(addr.district),
+    city: extractField(addr.city),
+    postalCode: addr.postalCode,
+    country: extractField(addr.country),
+    phone: addr.phone,
+  };
+}
+
 function AddressCard({ title, icon, addr }: { title: string; icon: string; addr: any }) {
-  if (!addr) return (
+  const normalized = normalizeAddress(addr);
+  
+  if (!normalized) return (
     <div className="rounded-lg border border-stroke p-4 dark:border-dark-3">
       <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-dark dark:text-white">{icon} {title}</div>
       <div className="text-sm text-body-color dark:text-dark-6">Adres bilgisi yok</div>
     </div>
   );
-  const parts = [addr.fullName, addr.addressLine1, addr.addressLine2, addr.district, addr.city, addr.postalCode, addr.country].filter(Boolean);
+
+  const { fullName, addressLine1, addressLine2, district, city, postalCode, country, phone } = normalized;
+  const hasAnyData = fullName || addressLine1 || addressLine2 || district || city || postalCode || country;
+
+  if (!hasAnyData) {
+    // Normalize edilemedi, raw JSON göster
+    return (
+      <div className="rounded-lg border border-stroke p-4 dark:border-dark-3">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-dark dark:text-white">{icon} {title}</div>
+        <pre className="whitespace-pre-wrap text-xs text-body-color dark:text-dark-6">{JSON.stringify(addr, null, 2)}</pre>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-stroke p-4 dark:border-dark-3">
       <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-dark dark:text-white">{icon} {title}</div>
-      {parts.length > 0 ? (
-        <div className="space-y-0.5 text-sm text-body-color dark:text-dark-6">
-          {addr.fullName && <div className="font-medium text-dark dark:text-white">{addr.fullName}</div>}
-          {addr.addressLine1 && <div>{addr.addressLine1}</div>}
-          {addr.addressLine2 && <div>{addr.addressLine2}</div>}
-          <div>{[addr.district, addr.city, addr.postalCode].filter(Boolean).join(", ")}</div>
-          {addr.country && <div>{addr.country}</div>}
-        </div>
-      ) : (
-        <pre className="whitespace-pre-wrap text-xs text-body-color dark:text-dark-6">{JSON.stringify(addr, null, 2)}</pre>
-      )}
+      <div className="space-y-0.5 text-sm text-body-color dark:text-dark-6">
+        {fullName && <div className="font-medium text-dark dark:text-white">{fullName}</div>}
+        {phone && <div className="text-xs">📞 {phone}</div>}
+        {addressLine1 && <div>{addressLine1}</div>}
+        {addressLine2 && <div>{addressLine2}</div>}
+        {(district || city || postalCode) && (
+          <div>{[district, city, postalCode].filter(Boolean).join(", ")}</div>
+        )}
+        {country && <div>{country}</div>}
+      </div>
     </div>
   );
 }
