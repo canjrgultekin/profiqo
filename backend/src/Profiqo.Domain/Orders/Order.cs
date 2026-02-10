@@ -124,6 +124,19 @@ public sealed class Order : AggregateRoot<OrderId>
     public Money NetProfitOrZero()
         => CostBreakdown is null ? Money.Zero(TotalAmount.Currency) : CostBreakdown.NetProfit();
 
+    public void ReassignCustomer(CustomerId customerId, DateTimeOffset nowUtc)
+    {
+        if (customerId.Value == Guid.Empty)
+            throw new DomainException("customerId cannot be empty.");
+
+        if (customerId.Equals(CustomerId))
+            return;
+
+        CustomerId = customerId;
+        Touch(nowUtc);
+    }
+
+
     public void MarkCompleted(DateTimeOffset completedAtUtc)
     {
         if (Status is OrderStatus.Cancelled or OrderStatus.Refunded)

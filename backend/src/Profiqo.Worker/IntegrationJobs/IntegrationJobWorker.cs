@@ -59,8 +59,8 @@ internal sealed class IntegrationJobWorker : BackgroundService
                         processed = await ikas.SyncCustomersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     else if (job.Kind == IntegrationJobKind.IkasSyncOrders)
                         processed = await ikas.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
-                    else if (job.Kind == IntegrationJobKind.IkasSyncAbandonedCheckouts)
-                        processed = await ikas.SyncAbandonedCheckoutsAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
+                   // else if (job.Kind == IntegrationJobKind.IkasSyncAbandonedCheckouts)
+                       // processed = await ikas.SyncAbandonedCheckoutsAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);
                     else if (job.Kind == IntegrationJobKind.TrendyolSyncOrders)
                     {
                         processed = await trendyol.SyncOrdersAsync(job.JobId, tenantId, job.ConnectionId, job.PageSize, job.MaxPages, stoppingToken);

@@ -11,11 +11,15 @@ public sealed class FuzzyAddressSimilarityScorer : ICustomerSimilarityScorer
         var nameOk = NormalizeName(a.FirstName, a.LastName) == NormalizeName(b.FirstName, b.LastName);
         if (!nameOk) return Task.FromResult(0d);
 
+        var pa = NormalizePhone(a.ShippingAddress?.Phone ?? a.BillingAddress?.Phone);
+        var pb = NormalizePhone(b.ShippingAddress?.Phone ?? b.BillingAddress?.Phone);
+        var phoneMatch = !string.IsNullOrWhiteSpace(pa) && pa == pb;
+
         var sa = NormalizeAddress(a.ShippingAddress) ?? NormalizeAddress(a.BillingAddress) ?? "";
         var sb = NormalizeAddress(b.ShippingAddress) ?? NormalizeAddress(b.BillingAddress) ?? "";
 
         if (string.IsNullOrWhiteSpace(sa) || string.IsNullOrWhiteSpace(sb))
-            return Task.FromResult(0.2d); // name matches but no address info
+            return Task.FromResult(phoneMatch ? 0.95d : 0.2d); // name matches but no address info
 
         var jw = JaroWinkler(sa, sb);
 
@@ -25,12 +29,14 @@ public sealed class FuzzyAddressSimilarityScorer : ICustomerSimilarityScorer
         bonus += EqBonus(a, b, x => x.PostalCode, 0.05);
         bonus += EqBonus(a, b, x => x.Country, 0.03);
 
+        if (phoneMatch) bonus += 0.25;
+
         var score = Math.Min(1.0, jw + bonus);
 
         // guardrail: if city differs strongly, clamp
         var ca = NormalizeToken(a.ShippingAddress?.City ?? a.BillingAddress?.City);
         var cb = NormalizeToken(b.ShippingAddress?.City ?? b.BillingAddress?.City);
-        if (!string.IsNullOrWhiteSpace(ca) && !string.IsNullOrWhiteSpace(cb) && ca != cb && score > 0.85)
+        if (!phoneMatch && !string.IsNullOrWhiteSpace(ca) && !string.IsNullOrWhiteSpace(cb) && ca != cb && score > 0.85)
             score = 0.85;
 
         return Task.FromResult(score);
@@ -88,6 +94,36 @@ public sealed class FuzzyAddressSimilarityScorer : ICustomerSimilarityScorer
         while (t.Contains("  ", StringComparison.Ordinal)) t = t.Replace("  ", " ", StringComparison.Ordinal);
         return t.Trim();
     }
+
+    private static string NormalizePhone(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return "";
+
+        // keep digits only
+        var digits = new System.Text.StringBuilder(phone.Length);
+        foreach (var ch in phone)
+        {
+            if (char.IsDigit(ch)) digits.Append(ch);
+        }
+
+        var d = digits.ToString();
+        if (d.Length == 0) return "";
+
+        // TR heuristics
+        // 0532... (11 digits with leading 0) -> +90...
+        if (d.Length == 11 && d.StartsWith("0", StringComparison.Ordinal))
+            d = d.Substring(1);
+
+        if (d.Length == 10)
+            return "+90" + d;
+
+        if (d.StartsWith("90", StringComparison.Ordinal))
+            return "+" + d;
+
+        // fallback
+        return d.StartsWith("+", StringComparison.Ordinal) ? d : "+" + d;
+    }
+
 
     // Jaro-Winkler
     private static double JaroWinkler(string s1, string s2)

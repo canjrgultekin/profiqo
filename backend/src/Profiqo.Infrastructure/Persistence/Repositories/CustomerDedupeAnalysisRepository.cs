@@ -109,6 +109,7 @@ GROUP BY o.customer_id, o.channel, o.total_currency;
             string? a1 = TryGetString(root, "addressLine1");
             string? a2 = TryGetString(root, "addressLine2");
             string? fullName = TryGetString(root, "fullName");
+            string? phone = TryGetString(root, "phone");
 
             if (city is null && root.TryGetProperty("city", out var c) && c.ValueKind == JsonValueKind.Object)
                 city = TryGetString(c, "name");
@@ -121,11 +122,13 @@ GROUP BY o.customer_id, o.channel, o.total_currency;
 
             postal ??= TryGetString(root, "postalCode");
 
-            return new AddressSnapshotDto(country, city, district, postal, a1, a2, fullName);
+            var dto = new AddressSnapshotDto(country, city, district, postal, a1, a2, fullName) { Phone = phone };
+
+            return dto;
         }
         catch
         {
-            return new AddressSnapshotDto(null, null, null, null, null, null, null);
+            return new AddressSnapshotDto(null, null, null, null, null, null, null) { Phone = null };
         }
     }
 

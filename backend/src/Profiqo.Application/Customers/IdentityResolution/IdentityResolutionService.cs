@@ -60,7 +60,11 @@ internal sealed class IdentityResolutionService : IIdentityResolutionService
         if (existing is null)
         {
             var created = Customer.Create(tenantId, nowUtc);
-            created.SetName(firstName, lastName, nowUtc);
+
+            var fn = NormalizeNameTokenOrNull(firstName);
+            var ln = NormalizeNameTokenOrNull(lastName);
+            if (fn is not null || ln is not null)
+                created.SetName(fn, ln, nowUtc);
 
             foreach (var i in identities)
                 AddIdentity(created, tenantId, i, nowUtc);
@@ -69,14 +73,30 @@ internal sealed class IdentityResolutionService : IIdentityResolutionService
             return created.Id;
         }
 
-        // Update name if needed (non-destructive)
-        if (!string.IsNullOrWhiteSpace(firstName) || !string.IsNullOrWhiteSpace(lastName))
-            existing.SetName(firstName, lastName, nowUtc);
+        // Update name if needed (non-destructive, field-level)
+        var inFirst = NormalizeNameTokenOrNull(firstName);
+        var inLast = NormalizeNameTokenOrNull(lastName);
+
+        if (inFirst is not null || inLast is not null)
+        {
+            var nextFirst = inFirst ?? existing.FirstName;
+            var nextLast = inLast ?? existing.LastName;
+
+            if (nextFirst != existing.FirstName || nextLast != existing.LastName)
+                existing.SetName(nextFirst, nextLast, nowUtc);
+        }
 
         foreach (var i in identities)
             AddIdentity(existing, tenantId, i, nowUtc);
 
         return existing.Id;
+    }
+
+    private static string? NormalizeNameTokenOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var t = value.Trim();
+        return t.Length == 0 ? null : t;
     }
 
     private void AddIdentity(Customer customer, TenantId tenantId, IdentityInput i, DateTimeOffset nowUtc)

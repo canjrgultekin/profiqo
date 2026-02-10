@@ -1,11 +1,1 @@
-{
-  "app": {
-    "[project]/src/app/auth/sign-in/page": [],
-    "[project]/src/app/integrations/ikas/page": [],
-    "[project]/src/app/page": [],
-    "[project]/src/app/settings/users/page": []
-  },
-  "appUsingSizeAdjust": false,
-  "pages": {},
-  "pagesUsingSizeAdjust": false
-}
+{"pages":{},"app":{},"appUsingSizeAdjust":false,"pagesUsingSizeAdjust":false}

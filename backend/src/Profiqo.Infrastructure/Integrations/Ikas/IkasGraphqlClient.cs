@@ -9,6 +9,8 @@ using Microsoft.Extensions.Options;
 using Profiqo.Application.Abstractions.Integrations.Ikas;
 using Profiqo.Application.Common.Exceptions;
 
+using static System.Net.WebRequestMethods;
+
 namespace Profiqo.Infrastructure.Integrations.Ikas;
 
 public sealed class IkasOptions
@@ -66,7 +68,7 @@ query listCustomer(
     page
     limit
     hasNext
-    data {
+    data { accountStatus
       id
       email
       firstName
@@ -75,7 +77,8 @@ query listCustomer(
       updatedAt
       createdAt
       orderCount
-      totalOrderPrice
+      totalOrderPrice registrationSource birthDate fullName gender orderCount phoneSubscriptionStatus smsSubscriptionStatus
+      addresses {addressLine1 addressLine2 attributes {customerAttributeId customerAttributeOptionId value } city {code id name } company country {code id iso2 iso3 name } createdAt deleted district {code id name } firstName id identityNumber isDefault lastName phone postalCode region {createdAt deleted id name updatedAt } state {code id name } taxNumber taxOffice title updatedAt }
     }
   }
 }",
@@ -104,14 +107,12 @@ query listOrder(
   $pagination: PaginationInput,
   $search: String,
   $sort: String,
-  $status: OrderStatusEnumFilterInput,
   $updatedAt: DateFilterInput
 ) {
   listOrder(
     pagination: $pagination,
     search: $search,
     sort: $sort,
-    status: $status,
     updatedAt: $updatedAt
   ) {
     count
@@ -131,8 +132,8 @@ query listOrder(
       salesChannelId
       salesChannel { id name type }
 
-      customer { id email firstName lastName phone }
-
+      customer { id email firstName lastName isGuestCheckout phone }
+      customerId
       orderLineItems {
         id
         quantity
@@ -229,20 +230,7 @@ query listOrder(
             {
                 pagination = new { page, limit },
                 search = (string?)null,
-                sort = "-updatedAt",
-                status = new
-                {
-                    @in = new[]
-                    {
-                        "CANCELLED",
-                        "CREATED",
-                        "PARTIALLY_CANCELLED",
-                        "PARTIALLY_REFUNDED",
-                        "REFUNDED",
-                        "REFUND_REJECTED",
-                        "REFUND_REQUESTED"
-                    }
-                },
+                sort = "-orderedAt"
            //     updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
             }
         };
@@ -284,11 +272,14 @@ query listAbandonedCheckouts (
       id
       orderNumber
       status
-      recoveryStatus
-      recoverEmailStatus
       updatedAt
-      customer { email firstName lastName phone }
-      cart { id lastActivityDate currencyCode totalPrice updatedAt itemCount }
+      customer {accountStatus email firstName lastName phone  }
+      cart { id lastActivityDate currencyCode totalPrice updatedAt itemCount items 
+			{createdAt currencyCode   discountPrice  finalPrice  id   price quantity  status     unitPrice updatedAt variant {  brand {id name }  categories { id name }   id  name productId      } } 
+			
+			
+		
+        }
     }
   }
 }",
@@ -310,7 +301,7 @@ query listAbandonedCheckouts (
 
     private async Task<JsonDocument> PostAsync(string storeName, string accessToken, string op, object body, CancellationToken ct)
     {
-        var endpoint = ResolveGraphqlEndpoint(storeName);
+        var endpoint = "https://api.myikas.com/api/v1/admin/graphql"; //ResolveGraphqlEndpoint(storeName);
         var url = QueryHelpers.AddQueryString(endpoint, "op", op);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url);
@@ -348,7 +339,7 @@ query listAbandonedCheckouts (
     {
         var s = (storeName ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(s))
-            return $"https://{s}.myikas.com/api/admin/graphql";
+            return $"https://{s}.myikas.com/api/v1/admin/graphql";
         return _opts.GraphqlEndpoint;
     }
 }

@@ -36,4 +36,7 @@ public sealed record AddressSnapshotDto(
     string? PostalCode,
     string? AddressLine1,
     string? AddressLine2,
-    string? FullName);
+    string? FullName)
+{
+    public string? Phone { get; init; }
+}
