@@ -1,7 +1,7 @@
 /**
- * Profiqo — ikas Storefront Events Tracker v2.0
+ * Profiqo — ikas Storefront Events Tracker v2.1
  * ================================================
- * 4 event tipi: ADD_TO_CART, REMOVE_FROM_CART, COMPLETE_CHECKOUT, ADD_TO_WISHLIST
+ * Event tipleri: ADD_TO_CART, REMOVE_FROM_CART, COMPLETE_CHECKOUT, ADD_TO_WISHLIST
  * Müşteri bazlı tracking, firma bilgisi, dinamik backend URL.
  *
  * Kullanım (ikas Storefront Events → Script Barındırma):
@@ -9,7 +9,7 @@
  *
  * Parametreler (?query string ile):
  *   apiKey    — (zorunlu) Profiqo publicApiKey (pfq_pub_XXXXX)
- *   endpoint  — (opsiyonel) Custom backend URL (default: https://api.profiqo.com)
+ *   endpoint  — (opsiyonel) Custom backend URL (default: http://localhost:5164)
  *
  * Debug:
  *   window.__profiqo.getCustomer()  — Mevcut müşteri bilgisi
@@ -17,7 +17,7 @@
  *   window.__profiqo.track(type, data) — Manuel event tetikle
  *   window.__profiqo.flush()        — Queue'yu hemen gönder
  *
- * @version 2.0.0
+ * @version 2.1.0
  * @author  Profiqo
  */
 (function () {
@@ -27,7 +27,7 @@
   // 1. CONFIGURATION
   // ──────────────────────────────────────────────────
   var CONFIG = {
-    DEFAULT_API_BASE: "https://api.profiqo.com",
+    DEFAULT_API_BASE: "http://localhost:5164",
     EVENTS_ENDPOINT: "/api/v1/events/storefront",
     CONFIG_ENDPOINT: "/api/v1/events/storefront/config",
     DEVICE_ID_COOKIE: "_pfq_did",
@@ -49,10 +49,24 @@
       "COMPLETECHECKOUT": "COMPLETE_CHECKOUT",
       "ADDTOWISHLIST": "ADD_TO_WISHLIST"
     },
-    // ikas event type'ları numerik — sendEvent v3 formatı
-    // Bu mapping ikas'ın gerçek payload'ından reverse-engineer edildi
-    // t:4 = addToCart (doğrulandı), t:16 = addToWishlist (doğrulandı)
-    // Diğerleri test ile doğrulanacak, birden fazla olası değer tutuyoruz
+    // ikas Storefront Events callback'i iki format kullanır:
+    //
+    // FORMAT A — Storefront Events API (tam obje):
+    //   callback({ type: "addToCart", data: { item, quantity, cart: { customer, shippingAddress, ... } } })
+    //   type string: "addToCart", "removeFromCart", "completeCheckout", "addToWishlist"
+    //
+    // FORMAT B — ikas sendEvent v3 (minified):
+    //   callback({ e: [{ id, t: 4, ts, d: { u, r, d: { crt, crtItm } } }], ud: { id, em, ph, fn, ln } })
+    //   t numeric: 4=ADD_TO_CART, 3=REMOVE_FROM_CART, 6=COMPLETE_CHECKOUT, 8=ADD_TO_WISHLIST
+
+    // String type mapping (FORMAT A — Storefront Events API)
+    IKAS_STRING_EVENTS: {
+      "addtocart": "ADD_TO_CART",
+      "removefromcart": "REMOVE_FROM_CART",
+      "completecheckout": "COMPLETE_CHECKOUT",
+      "addtowishlist": "ADD_TO_WISHLIST"
+    },
+    // Numeric type mapping (FORMAT B — sendEvent v3)
     IKAS_EVENT_TYPES: {
       1: "PAGE_VIEW",
       2: "PRODUCT_VIEW",
@@ -62,14 +76,13 @@
       6: "COMPLETE_CHECKOUT",
       7: "SEARCH",
       8: "ADD_TO_WISHLIST",
-      // ikas bazı event'lerde daha yüksek numeric ID'ler kullanıyor
       12: "COMPLETE_CHECKOUT",
       16: "ADD_TO_WISHLIST"
     }
   };
 
   // ──────────────────────────────────────────────────
-  // 2. SCRIPT PARAMS — publicApiKey ve endpointUrl al
+  // 2. SCRIPT PARAMS
   // ──────────────────────────────────────────────────
   var scriptEl = document.currentScript;
   var apiKey = null;
@@ -82,7 +95,6 @@
       var customEndpoint = params.get("endpoint") || params.get("url");
       if (customEndpoint) endpointBase = customEndpoint.replace(/\/+$/, "");
     } catch (e) {
-      // URLSearchParams desteklenmiyorsa regex ile parse et
       var match = scriptEl.src.match(/[?&]apiKey=([^&]+)/);
       if (match) apiKey = decodeURIComponent(match[1]);
     }
@@ -97,7 +109,6 @@
   // 3. UTILITY FUNCTIONS
   // ──────────────────────────────────────────────────
 
-  /** UUID v4 üret — crypto.randomUUID varsa onu kullan, yoksa fallback */
   function generateId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -109,13 +120,11 @@
     });
   }
 
-  /** Cookie oku */
   function getCookie(name) {
     var match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
     return match ? decodeURIComponent(match[2]) : null;
   }
 
-  /** Cookie yaz (Secure + SameSite=Lax) */
   function setCookie(name, value, days) {
     var expires = "";
     if (days) {
@@ -128,7 +137,6 @@
       "; path=/; SameSite=Lax; Secure";
   }
 
-  /** Device ID — 2 yıl geçerli cookie-based UUID */
   function getOrCreateDeviceId() {
     var did = getCookie(CONFIG.DEVICE_ID_COOKIE);
     if (!did) {
@@ -138,7 +146,6 @@
     return did;
   }
 
-  /** Session ID — 30dk timeout, sessionStorage */
   function getOrCreateSessionId() {
     var now = Date.now();
     var raw = null;
@@ -158,7 +165,6 @@
     return sid;
   }
 
-  /** Mevcut sayfa bilgisi */
   function getPageContext() {
     return {
       url: window.location.href,
@@ -173,24 +179,100 @@
   }
 
   // ──────────────────────────────────────────────────
-  // 4. CUSTOMER CONTEXT — Logged-in müşteri bilgisi
+  // 4. CUSTOMER CONTEXT
   // ──────────────────────────────────────────────────
 
   var customerContext = null;
-  var ikasRawPayload = null; // Son gelen ikas raw payload'ı (ud bilgisi için)
+  var ikasRawPayload = null;
 
   /**
-   * ikas storefront'undaki müşteri bilgisini çıkar.
-   * Öncelik sırası:
-   *   1) ikas raw payload'daki ud (user data) — en güvenilir kaynak
-   *   2) window.__ikas__.customer
-   *   3) window.__NEXT_DATA__.props
-   *   4) ikas JWT cookie
-   *   5) Profiqo sessionStorage cache
+   * ikas FORMAT A event data'sından müşteri bilgisi çıkar.
+   * Kaynak önceliği:
+   *   1) cart.customer / order.customer (email, firstName, lastName, id)
+   *   2) cart.shippingAddress / order.shippingAddress (phone, firstName, lastName)
+   *   3) cart.customerId (sadece id)
+   */
+  function extractCustomerFromEventData(eventData) {
+    if (!eventData) return null;
+
+    var customer = null;
+    var phone = null;
+    var addrFirstName = null;
+    var addrLastName = null;
+
+    // customer objesini bul
+    if (eventData.cart && eventData.cart.customer) {
+      customer = eventData.cart.customer;
+    } else if (eventData.order && eventData.order.customer) {
+      customer = eventData.order.customer;
+    } else if (eventData.customer && (eventData.customer.id || eventData.customer.email)) {
+      customer = eventData.customer;
+    }
+
+    // shippingAddress'ten telefon ve isim al
+    var addr = null;
+    if (eventData.cart && eventData.cart.shippingAddress) {
+      addr = eventData.cart.shippingAddress;
+    } else if (eventData.order && eventData.order.shippingAddress) {
+      addr = eventData.order.shippingAddress;
+    } else if (eventData.shippingAddress) {
+      addr = eventData.shippingAddress;
+    }
+    if (addr) {
+      phone = addr.phone || null;
+      addrFirstName = addr.firstName || null;
+      addrLastName = addr.lastName || null;
+    }
+
+    // customerId fallback (cart.customerId direkt field olarak)
+    var fallbackId = null;
+    if (eventData.cart && eventData.cart.customerId) {
+      fallbackId = eventData.cart.customerId;
+    }
+
+    if (customer && (customer.id || customer.email)) {
+      return {
+        id: customer.id || fallbackId || null,
+        email: customer.email || null,
+        firstName: customer.firstName || addrFirstName || null,
+        lastName: customer.lastName || addrLastName || null,
+        phone: customer.phone || phone || null,
+        isGuest: customer.isGuestCheckout === true
+      };
+    }
+
+    // customer objesi yok ama customerId var
+    if (fallbackId) {
+      return {
+        id: fallbackId,
+        email: null,
+        firstName: addrFirstName || null,
+        lastName: addrLastName || null,
+        phone: phone || null,
+        isGuest: false
+      };
+    }
+
+    // Müşteri yok ama shipping address'te telefon var
+    if (phone) {
+      return {
+        id: null,
+        email: null,
+        firstName: addrFirstName || null,
+        lastName: addrLastName || null,
+        phone: phone,
+        isGuest: true
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Fallback müşteri context'i — window global'lardan, cookie'den veya cache'den.
    */
   function extractCustomerContext() {
-    // Yol 1: ikas raw event payload'daki ud (user data)
-    // ikas sendEvent v3: { ud: { id, em, ph, fn, ln } }
+    // ikas raw payload ud
     if (ikasRawPayload && ikasRawPayload.ud) {
       var ud = ikasRawPayload.ud;
       if (ud.id || ud.em) {
@@ -205,26 +287,28 @@
       }
     }
 
-    // Yol 2: ikas window global'den
+    // window.__ikas__.customer
     if (window.__ikas__ && window.__ikas__.customer) {
       var c = window.__ikas__.customer;
-      return {
-        id: c.id || null,
-        email: c.email || null,
-        firstName: c.firstName || null,
-        lastName: c.lastName || null,
-        phone: c.phone || null,
-        isGuest: false
-      };
+      if (c.id || c.email) {
+        return {
+          id: c.id || null,
+          email: c.email || null,
+          firstName: c.firstName || null,
+          lastName: c.lastName || null,
+          phone: c.phone || null,
+          isGuest: false
+        };
+      }
     }
 
-    // Yol 3: Next.js page props'dan
+    // __NEXT_DATA__.props
     if (window.__NEXT_DATA__ && window.__NEXT_DATA__.props) {
       var pageProps = window.__NEXT_DATA__.props.pageProps || window.__NEXT_DATA__.props;
       var cust = pageProps.customer || pageProps.currentCustomer || pageProps.user;
-      if (cust && cust.id) {
+      if (cust && (cust.id || cust.email)) {
         return {
-          id: cust.id,
+          id: cust.id || null,
           email: cust.email || null,
           firstName: cust.firstName || null,
           lastName: cust.lastName || null,
@@ -234,14 +318,14 @@
       }
     }
 
-    // Yol 4: ikas'ın set ettiği JWT cookie'den
+    // ikas JWT cookie
     var ikasToken = getCookie("ikas_ct") || getCookie("ikas_customer_token");
     if (ikasToken) {
       try {
         var parts = ikasToken.split(".");
         if (parts.length === 3) {
           var payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-          if (payload.sub || payload.customerId) {
+          if (payload.sub || payload.customerId || payload.email) {
             return {
               id: payload.sub || payload.customerId || null,
               email: payload.email || null,
@@ -253,75 +337,54 @@
           }
         }
       } catch (e) {}
-      return { id: null, email: null, firstName: null, lastName: null, phone: null, isGuest: false };
     }
 
-    // Yol 5: Profiqo'nun kendi customer cache'i
+    // sessionStorage cache
     try {
       var cached = sessionStorage.getItem(CONFIG.CUSTOMER_KEY);
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        var parsed = JSON.parse(cached);
+        if (parsed && (parsed.id || parsed.email || parsed.phone)) return parsed;
+      }
     } catch (e) {}
 
     return { id: null, email: null, firstName: null, lastName: null, phone: null, isGuest: true };
   }
 
   /**
-   * Müşteri context'ini güncelle — event data'sı veya ikas ud field'ından.
-   * ikas v3 formatında ud doğrudan raw payload'da geliyor, handleIkasEvent'te işleniyor.
-   * Bu fonksiyon backward compat ve manuel track için kaldı.
+   * Müşteri context'ini güncelle — sadece daha iyi bilgi varsa.
+   * null/guest üzerine yazmaz, zenginleştirir.
    */
-  function updateCustomerFromEvent(eventData) {
-    if (!eventData) return;
-    // ikas v3 ud formatı
-    if (eventData.ud && (eventData.ud.id || eventData.ud.em)) {
-      customerContext = {
-        id: eventData.ud.id || null,
-        email: eventData.ud.em || null,
-        firstName: eventData.ud.fn || null,
-        lastName: eventData.ud.ln || null,
-        phone: eventData.ud.ph || null,
-        isGuest: false
-      };
-      try { sessionStorage.setItem(CONFIG.CUSTOMER_KEY, JSON.stringify(customerContext)); } catch (e) {}
-      return;
-    }
-    // Eski format compat
-    var customer = eventData.customer || eventData.user;
-    if (customer && (customer.id || customer.email)) {
-      customerContext = {
-        id: customer.id || null,
-        email: customer.email || null,
-        firstName: customer.firstName || null,
-        lastName: customer.lastName || null,
-        phone: customer.phone || null,
-        isGuest: false
-      };
-      try { sessionStorage.setItem(CONFIG.CUSTOMER_KEY, JSON.stringify(customerContext)); } catch (e) {}
-    }
+  function updateCustomerContext(newCust) {
+    if (!newCust) return;
+    if (!newCust.id && !newCust.email && !newCust.phone) return;
+
+    var prev = customerContext || {};
+    customerContext = {
+      id: newCust.id || prev.id || null,
+      email: newCust.email || prev.email || null,
+      firstName: newCust.firstName || prev.firstName || null,
+      lastName: newCust.lastName || prev.lastName || null,
+      phone: newCust.phone || prev.phone || null,
+      isGuest: newCust.id ? false : (prev.id ? false : true)
+    };
+
+    try { sessionStorage.setItem(CONFIG.CUSTOMER_KEY, JSON.stringify(customerContext)); } catch (e) {}
   }
 
-  // İlk yükleme sırasında customer context'i çıkar
+  // İlk yükleme
   customerContext = extractCustomerContext();
 
   // ──────────────────────────────────────────────────
-  // 5. FIRMA CONTEXT — apiKey ile tenant bilgisi
+  // 5. FIRMA CONTEXT
   // ──────────────────────────────────────────────────
 
   var tenantContext = null;
 
-  /**
-   * Backend'den tenant/firma bilgisi çek (publicApiKey ile).
-   * Script yüklenirken 1 kez çağrılır, sessionStorage'a cache'lenir.
-   * Config response: { tenantId, tenantName, storeDomain, enabledEvents[] }
-   */
   function fetchTenantConfig() {
     var url = endpointBase + CONFIG.CONFIG_ENDPOINT + "?apiKey=" + encodeURIComponent(apiKey);
     if (typeof fetch === "function") {
-      fetch(url, {
-        method: "GET",
-        mode: "cors",
-        credentials: "omit"
-      })
+      fetch(url, { method: "GET", mode: "cors", credentials: "omit" })
         .then(function (res) { return res.json(); })
         .then(function (data) {
           if (data && data.tenantId) {
@@ -334,20 +397,14 @@
             try { sessionStorage.setItem(CONFIG.TENANT_KEY, JSON.stringify(tenantContext)); } catch (e) {}
           }
         })
-        .catch(function () {
-          // Sessizce devam et — config çekilemezse default ile çalış
-          // Tüm event'ler enabled kabul edilir
-        });
+        .catch(function () {});
     }
   }
 
-  // Cache'den tenant context yükle (sayfa geçişlerinde hız için)
   try {
     var cachedTenant = sessionStorage.getItem(CONFIG.TENANT_KEY);
     if (cachedTenant) tenantContext = JSON.parse(cachedTenant);
   } catch (e) {}
-
-  // Background'da taze config çek (cache olsa bile güncellik için)
   fetchTenantConfig();
 
   // ──────────────────────────────────────────────────
@@ -358,10 +415,6 @@
   var batchTimer = null;
   var deviceId = getOrCreateDeviceId();
 
-  /**
-   * Biriken event'leri toplu olarak backend'e gönder.
-   * Her batch'e güncel customer + tenant bilgisi eklenir.
-   */
   function flushQueue() {
     if (eventQueue.length === 0) return;
     var batch = eventQueue.splice(0, CONFIG.MAX_QUEUE_SIZE);
@@ -387,29 +440,19 @@
     sendPayload(payload, 0);
   }
 
-  /**
-   * Payload'u backend'e gönder.
-   * Öncelik sırası: Beacon API → fetch (keepalive) → XHR fallback
-   * Hata durumunda exponential backoff ile retry (max 2 deneme)
-   */
   function sendPayload(payload, attempt) {
     var url = endpointBase + CONFIG.EVENTS_ENDPOINT;
 
-    // 1. Beacon API (en güvenilir — sayfa kapansa bile gönderir)
-    // text/plain kullanarak CORS preflight bypass — backend her iki Content-Type'ı da kabul eder
     if (navigator.sendBeacon && attempt === 0) {
       var blob = new Blob([payload], { type: "text/plain" });
       var sent = navigator.sendBeacon(url, blob);
       if (sent) return;
     }
 
-    // 2. Fetch API (keepalive ile, credentials yok — cross-origin uyumluluğu için)
     if (typeof fetch === "function") {
       fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: payload,
         keepalive: true,
         mode: "cors",
@@ -424,16 +467,21 @@
       return;
     }
 
-    // 3. XHR fallback (eski tarayıcılar için)
     try {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", url, true);
       xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.onerror = function () {
+        if (attempt < CONFIG.MAX_RETRIES) {
+          setTimeout(function () {
+            sendPayload(payload, attempt + 1);
+          }, CONFIG.RETRY_DELAY_MS * Math.pow(2, attempt));
+        }
+      };
       xhr.send(payload);
     } catch (e) {}
   }
 
-  /** Event'i queue'ya ekle — queue dolunca veya 2sn sonra otomatik flush */
   function enqueueEvent(event) {
     eventQueue.push(event);
     if (eventQueue.length >= CONFIG.MAX_QUEUE_SIZE) {
@@ -449,34 +497,17 @@
     }
   }
 
-  // Sayfa kapatılırken veya gizlenirken kalan event'leri gönder
   window.addEventListener("beforeunload", function () { flushQueue(); });
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") flushQueue();
   });
 
   // ──────────────────────────────────────────────────
-  // 7. EVENT DATA EXTRACTORS — ikas sendEvent v3 formatı
+  // 7. EVENT DATA EXTRACTORS
   // ──────────────────────────────────────────────────
-  //
-  // ikas raw event yapısı (v3):
-  //   e[].t   → event type (numeric: 4=addToCart, 3=removeFromCart, 6=checkout, 8=wishlist)
-  //   e[].d   → event data wrapper
-  //   e[].d.d → actual data (nested)
-  //     .d.d.crt    → cart object { id, c(currency), pr(price), il[](items) }
-  //     .d.d.crtItm → the specific cart item { pid, vid, c(count), p(price) }
-  //     .d.d.ord    → order object (checkout)
-  //     .d.d.prd    → product object (product view / wishlist)
-  //   e[].d.u  → page URL
-  //   e[].d.r  → referrer
-  //   ud       → user data { id, em(email), ph(phone), fn(firstName), ln(lastName) }
-  //
 
-  /**
-   * ikas cart item'ı extract et
-   * ikas formatı: { pid: "uuid", vid: "uuid", c: 3, p: 4500 }
-   * pid = product ID, vid = variant ID, c = count/quantity, p = price (kuruş/cent değil, tam fiyat)
-   */
+  // ─── FORMAT B helpers (ikas sendEvent v3 minified) ───
+
   function extractIkasCartItem(crtItm) {
     if (!crtItm) return {};
     return {
@@ -487,10 +518,6 @@
     };
   }
 
-  /**
-   * ikas cart object'i extract et
-   * ikas formatı: { id: "uuid", c: "TRY", pr: 41533, il: [{pid,vid,c,p},...] }
-   */
   function extractIkasCart(crt) {
     if (!crt) return {};
     var result = {
@@ -499,25 +526,15 @@
       cartTotalPrice: crt.pr || null,
       cartItemCount: crt.il ? crt.il.length : null
     };
-
     if (crt.il && Array.isArray(crt.il)) {
-      result.items = crt.il.map(function (item) {
-        return extractIkasCartItem(item);
-      });
+      result.items = crt.il.map(function (item) { return extractIkasCartItem(item); });
     }
-
     return result;
   }
 
-  /**
-   * ADD_TO_CART / REMOVE_FROM_CART data extractor
-   * ikas v3: e[].d.d = { crt: {cart}, crtItm: {the added/removed item} }
-   */
-  function extractCartEventData(innerData) {
+  function extractCartEventDataV3(innerData) {
     if (!innerData) return {};
     var result = {};
-
-    // Sepete eklenen/çıkarılan ürün
     if (innerData.crtItm) {
       var item = extractIkasCartItem(innerData.crtItm);
       result.productId = item.productId;
@@ -525,8 +542,6 @@
       result.quantity = item.quantity;
       result.price = item.price;
     }
-
-    // Sepet bilgisi
     if (innerData.crt) {
       var cart = extractIkasCart(innerData.crt);
       result.cartId = cart.cartId;
@@ -535,41 +550,26 @@
       result.cartItemCount = cart.cartItemCount;
       result.cartItems = cart.items;
     }
-
     return result;
   }
 
-  /**
-   * COMPLETE_CHECKOUT data extractor
-   * ikas v3: e[].d.d = { ord: {order} } veya doğrudan order bilgileri
-   */
-  function extractCheckoutEventData(innerData) {
+  function extractCheckoutEventDataV3(innerData) {
     if (!innerData) return {};
-    var result = {};
     var ord = innerData.ord || innerData;
-
+    var result = {};
     result.orderId = ord.id || ord.oid || null;
     result.orderNumber = ord.on || ord.orderNumber || null;
     result.totalPrice = ord.pr || ord.tp || null;
     result.currency = ord.c || "TRY";
-
-    // Sipariş kalemleri
     var items = ord.il || ord.items;
     if (items && Array.isArray(items)) {
       result.itemCount = items.length;
-      result.items = items.map(function (item) {
-        return extractIkasCartItem(item);
-      });
+      result.items = items.map(function (item) { return extractIkasCartItem(item); });
     }
-
     return result;
   }
 
-  /**
-   * ADD_TO_WISHLIST data extractor
-   * ikas v3: e[].d.d = { pr: { id: "product-uuid" } }
-   */
-  function extractWishlistEventData(innerData) {
+  function extractWishlistEventDataV3(innerData) {
     if (!innerData) return {};
     var prd = innerData.pr || innerData.prd || innerData;
     return {
@@ -578,71 +578,196 @@
     };
   }
 
-  // ──────────────────────────────────────────────────
-  // 8. ikas v3 EVENT PARSER & HANDLER
-  // ──────────────────────────────────────────────────
-
-  /**
-   * ikas numeric event type'ı Profiqo string type'a çevir.
-   * Desteklenen: 3=REMOVE_FROM_CART, 4=ADD_TO_CART, 6=COMPLETE_CHECKOUT, 8=ADD_TO_WISHLIST
-   */
-  function resolveIkasEventType(numericType) {
-    var mapped = CONFIG.IKAS_EVENT_TYPES[numericType];
-    if (!mapped) return null;
-    // Sadece desteklediğimiz 4 event tipini geçir
-    var supported = ["ADD_TO_CART", "REMOVE_FROM_CART", "COMPLETE_CHECKOUT", "ADD_TO_WISHLIST"];
-    return supported.indexOf(mapped) !== -1 ? mapped : null;
-  }
-
-  /**
-   * String event tipini normalize et (window.__profiqo.track() ile kullanım için)
-   */
-  function normalizeEventType(type) {
-    if (!type) return null;
-    if (typeof type === "number") return resolveIkasEventType(type);
-    var normalized = type.toUpperCase().replace(/[_\-\s]/g, "");
-    return CONFIG.SUPPORTED_EVENTS[normalized] || null;
-  }
-
-  /** Tenant config'deki enabledEvents listesini kontrol et */
-  function isEventEnabled(eventType) {
-    if (!tenantContext || !tenantContext.enabledEvents) return true;
-    return tenantContext.enabledEvents.indexOf(eventType) !== -1;
-  }
-
-  /** Event tipine göre uygun data extractor'ı seç */
-  function extractEventData(eventType, innerData) {
+  function extractEventDataV3(eventType, innerData) {
     switch (eventType) {
       case "ADD_TO_CART":
       case "REMOVE_FROM_CART":
-        return extractCartEventData(innerData);
+        return extractCartEventDataV3(innerData);
       case "COMPLETE_CHECKOUT":
-        return extractCheckoutEventData(innerData);
+        return extractCheckoutEventDataV3(innerData);
       case "ADD_TO_WISHLIST":
-        return extractWishlistEventData(innerData);
+        return extractWishlistEventDataV3(innerData);
       default:
         return innerData || {};
     }
   }
 
+  // ─── FORMAT A helpers (ikas Storefront Events API — tam obje) ───
+
   /**
-   * ikas v3 raw event handler.
-   * ikas IkasEvents.subscribe callback'i şu yapıda payload gönderir:
-   *   { e: [{id,t,ts,d:{u,r,d:{crt,crtItm,...}}}], ud: {id,em,ph,fn,ln}, scid, sid, ... }
+   * FORMAT A: ADD_TO_CART / REMOVE_FROM_CART
+   * ikas payload: { type: "addToCart", data: { item: {variant, price, quantity}, quantity, cart: {customer, orderLineItems, totalPrice, shippingAddress} } }
+   */
+  function extractCartEventDataFormatA(eventData) {
+    if (!eventData) return {};
+    var result = {};
+
+    var item = eventData.item;
+    if (item) {
+      result.quantity = eventData.quantity || item.quantity || 1;
+      result.price = item.finalPrice || item.price || null;
+      result.currency = item.currencyCode || "TRY";
+
+      if (item.variant) {
+        result.productId = item.variant.productId || null;
+        result.variantId = item.variant.id || null;
+        result.productName = item.variant.name || null;
+        result.productSlug = item.variant.slug || null;
+        if (item.variant.brand) result.brandName = item.variant.brand.name || null;
+        if (item.variant.categories && item.variant.categories.length > 0) {
+          result.categoryName = item.variant.categories[0].name || null;
+        }
+      }
+    }
+
+    var cart = eventData.cart;
+    if (cart) {
+      result.cartId = cart.id || null;
+      result.currency = cart.currencyCode || result.currency || "TRY";
+      result.cartTotalPrice = cart.totalFinalPrice || cart.totalPrice || null;
+      var lineItems = cart.orderLineItems;
+      if (lineItems && Array.isArray(lineItems)) {
+        result.cartItemCount = lineItems.length;
+        result.cartItems = lineItems.map(function (li) {
+          return {
+            productId: li.variant ? li.variant.productId : null,
+            variantId: li.variant ? li.variant.id : null,
+            quantity: li.quantity || 1,
+            price: li.finalPrice || li.price || null,
+            productName: li.variant ? li.variant.name : null
+          };
+        });
+      }
+    }
+
+    return result;
+  }
+
+  function extractCheckoutEventDataFormatA(eventData) {
+    if (!eventData) return {};
+    var order = eventData.order || eventData.cart || eventData;
+    var result = {};
+    result.orderId = order.id || null;
+    result.orderNumber = order.orderNumber || null;
+    result.totalPrice = order.totalFinalPrice || order.totalPrice || null;
+    result.currency = order.currencyCode || "TRY";
+    var lineItems = order.orderLineItems;
+    if (lineItems && Array.isArray(lineItems)) {
+      result.itemCount = lineItems.length;
+      result.items = lineItems.map(function (li) {
+        return {
+          productId: li.variant ? li.variant.productId : null,
+          variantId: li.variant ? li.variant.id : null,
+          quantity: li.quantity || 1,
+          price: li.finalPrice || li.price || null,
+          productName: li.variant ? li.variant.name : null
+        };
+      });
+    }
+    return result;
+  }
+
+  function extractWishlistEventDataFormatA(eventData) {
+    if (!eventData) return {};
+    return {
+      productId: eventData.productId || (eventData.product ? eventData.product.id : null) || null,
+      variantId: eventData.variantId || null
+    };
+  }
+
+  // ──────────────────────────────────────────────────
+  // 8. EVENT HANDLER
+  // ──────────────────────────────────────────────────
+
+  function resolveIkasEventType(numericType) {
+    var mapped = CONFIG.IKAS_EVENT_TYPES[numericType];
+    if (!mapped) return null;
+    var supported = ["ADD_TO_CART", "REMOVE_FROM_CART", "COMPLETE_CHECKOUT", "ADD_TO_WISHLIST"];
+    return supported.indexOf(mapped) !== -1 ? mapped : null;
+  }
+
+  function normalizeEventType(type) {
+    if (!type) return null;
+    if (typeof type === "number") return resolveIkasEventType(type);
+    var lower = type.toLowerCase().replace(/[_\-\s]/g, "");
+    var fromStringMap = CONFIG.IKAS_STRING_EVENTS[lower];
+    if (fromStringMap) return fromStringMap;
+    var upper = type.toUpperCase().replace(/[_\-\s]/g, "");
+    return CONFIG.SUPPORTED_EVENTS[upper] || null;
+  }
+
+  function isEventEnabled(eventType) {
+    if (!tenantContext || !tenantContext.enabledEvents) return true;
+    return tenantContext.enabledEvents.indexOf(eventType) !== -1;
+  }
+
+  /**
+   * Ana event handler — 3 format destekler:
    *
-   * UYARI: Bu callback "type" field'lı obje DEĞİL, ikas'ın kendi minified formatı.
+   * FORMAT A — ikas Storefront Events API (gerçek payload'dan doğrulanmış):
+   *   { type: "addToCart", data: { item, quantity, cart: { customer, shippingAddress, orderLineItems } } }
+   *   customer bilgisi: data.cart.customer (email, firstName, lastName, id)
+   *   telefon bilgisi:  data.cart.shippingAddress.phone
+   *
+   * FORMAT B — ikas sendEvent v3 (minified):
+   *   { e: [{ t: 4, d: { d: { crt, crtItm } } }], ud: { id, em, ph, fn, ln } }
+   *
+   * FORMAT C — window.__profiqo.track() (manuel):
+   *   handleIkasEvent({ type: "ADD_TO_CART", data: {...} })
    */
   function handleIkasEvent(rawPayload) {
     try {
       if (!rawPayload) return;
 
-      // ikas v3 formatı: { e: [...], ud: {...}, ... }
-      // VEYA window.__profiqo.track() ile gelen: { type: "ADD_TO_CART", data: {...} }
-      var isIkasV3 = rawPayload.e && Array.isArray(rawPayload.e);
-      var isManualTrack = rawPayload.type && !rawPayload.e;
+      var isFormatB = rawPayload.e && Array.isArray(rawPayload.e);
+      var hasType = typeof rawPayload.type === "string" || typeof rawPayload.type === "number";
+      var isFormatA = hasType && rawPayload.data && typeof rawPayload.data === "object" && !isFormatB;
 
-      if (isManualTrack) {
-        // Manuel track — eski format
+      // ── FORMAT A: ikas Storefront Events API ──
+      if (isFormatA) {
+        var eventType = normalizeEventType(rawPayload.type);
+        if (!eventType || !isEventEnabled(eventType)) return;
+
+        var eventData = rawPayload.data;
+
+        // ★ Müşteri bilgisini event data'sından çıkar
+        //   cart.customer → email, firstName, lastName, id
+        //   cart.shippingAddress → phone
+        var eventCustomer = extractCustomerFromEventData(eventData);
+        if (eventCustomer) {
+          updateCustomerContext(eventCustomer);
+        }
+
+        // Event data extract (zengin format)
+        var extractedData;
+        switch (eventType) {
+          case "ADD_TO_CART":
+          case "REMOVE_FROM_CART":
+            extractedData = extractCartEventDataFormatA(eventData);
+            break;
+          case "COMPLETE_CHECKOUT":
+            extractedData = extractCheckoutEventDataFormatA(eventData);
+            break;
+          case "ADD_TO_WISHLIST":
+            extractedData = extractWishlistEventDataFormatA(eventData);
+            break;
+          default:
+            extractedData = eventData || {};
+        }
+
+        enqueueEvent({
+          eventId: generateId(),
+          type: eventType,
+          occurredAt: new Date().toISOString(),
+          data: extractedData,
+          page: getPageContext(),
+          customer: customerContext || extractCustomerContext()
+        });
+        return;
+      }
+
+      // ── FORMAT C: Manuel track ──
+      if (hasType && !isFormatB) {
         var manualType = normalizeEventType(rawPayload.type);
         if (!manualType || !isEventEnabled(manualType)) return;
         enqueueEvent({
@@ -656,37 +781,32 @@
         return;
       }
 
-      if (!isIkasV3) return;
+      // ── FORMAT B: ikas sendEvent v3 ──
+      if (!isFormatB) return;
 
-      // ikas raw payload'ı sakla (ud bilgisi için)
       ikasRawPayload = rawPayload;
 
-      // User data'dan müşteri bilgisi güncelle
       if (rawPayload.ud && (rawPayload.ud.id || rawPayload.ud.em)) {
-        customerContext = {
+        updateCustomerContext({
           id: rawPayload.ud.id || null,
           email: rawPayload.ud.em || null,
           firstName: rawPayload.ud.fn || null,
           lastName: rawPayload.ud.ln || null,
           phone: rawPayload.ud.ph || null,
           isGuest: false
-        };
-        try { sessionStorage.setItem(CONFIG.CUSTOMER_KEY, JSON.stringify(customerContext)); } catch (ex) {}
+        });
       }
 
-      var currentCustomer = customerContext || extractCustomerContext();
+      var currentCustomerB = customerContext || extractCustomerContext();
 
-      // Her event'i işle
       rawPayload.e.forEach(function (ikasEvent) {
-        var eventType = resolveIkasEventType(ikasEvent.t);
-        if (!eventType) return;
-        if (!isEventEnabled(eventType)) return;
+        var evtType = resolveIkasEventType(ikasEvent.t);
+        if (!evtType) return;
+        if (!isEventEnabled(evtType)) return;
 
-        // ikas nested data: e[].d.d → actual event data
         var innerData = (ikasEvent.d && ikasEvent.d.d) ? ikasEvent.d.d : {};
-        var eventData = extractEventData(eventType, innerData);
+        var evtData = extractEventDataV3(evtType, innerData);
 
-        // Sayfa bilgisi — ikas event'ten veya mevcut page'den
         var page = getPageContext();
         if (ikasEvent.d) {
           if (ikasEvent.d.u) page.url = ikasEvent.d.u;
@@ -695,40 +815,31 @@
 
         enqueueEvent({
           eventId: ikasEvent.id || generateId(),
-          type: eventType,
+          type: evtType,
           occurredAt: ikasEvent.ts ? new Date(ikasEvent.ts).toISOString() : new Date().toISOString(),
-          data: eventData,
+          data: evtData,
           page: page,
-          customer: currentCustomer
+          customer: currentCustomerB
         });
       });
 
     } catch (e) {
-      // Sessizce devam et — storefront deneyimini asla bozma
+      // Sessizce devam et
     }
   }
 
   // ──────────────────────────────────────────────────
-  // 9. INITIALIZATION — ikas IkasEvents'e subscribe ol
+  // 9. INITIALIZATION
   // ──────────────────────────────────────────────────
 
-  /**
-   * ikas'ın window.IkasEvents objesine subscribe ol.
-   * ikas theme'ı async yüklendiği için IkasEvents hazır olmayabilir,
-   * bu durumda 200ms aralıklarla 10sn boyunca poll yapıyoruz.
-   */
   function subscribeToIkasEvents() {
     if (typeof window.IkasEvents !== "undefined" && typeof window.IkasEvents.subscribe === "function") {
-      window.IkasEvents.subscribe({
-        id: CONFIG.SUBSCRIBE_ID,
-        callback: handleIkasEvent
-      });
+      window.IkasEvents.subscribe({ id: CONFIG.SUBSCRIBE_ID, callback: handleIkasEvent });
       return true;
     }
     return false;
   }
 
-  // İlk deneme
   if (!subscribeToIkasEvents()) {
     var pollCount = 0;
     var pollInterval = setInterval(function () {
@@ -743,20 +854,16 @@
   }
 
   // ──────────────────────────────────────────────────
-  // 10. GLOBAL API — Debug ve manuel event tetikleme
+  // 10. GLOBAL API
   // ──────────────────────────────────────────────────
 
   window.__profiqo = {
-    version: "2.0.0",
+    version: "2.1.0",
     apiKey: apiKey,
     deviceId: deviceId,
-    /** Mevcut müşteri bilgisini döner */
     getCustomer: function () { return customerContext || extractCustomerContext(); },
-    /** Mevcut firma/tenant bilgisini döner */
     getTenant: function () { return tenantContext; },
-    /** Queue'daki tüm event'leri hemen gönder */
     flush: flushQueue,
-    /** Manuel event tetikle (test için) — örnek: window.__profiqo.track('ADD_TO_CART', { product: { id: '123', name: 'Test' }, quantity: 1, price: 99.90 }) */
     track: function (type, data) {
       handleIkasEvent({ type: type, data: data });
     }
