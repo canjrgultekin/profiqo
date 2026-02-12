@@ -90,6 +90,10 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasColumnName("billing_address_json")
             .HasColumnType("jsonb");
 
+        builder.Property<string?>("ProviderCustomerJson")
+            .HasColumnName("provider_customer_json")
+            .HasColumnType("jsonb");
+
         builder.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field);
         builder.OwnsMany(x => x.Lines, l =>
         {
@@ -110,9 +114,14 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
 
             l.Property(p => p.Sku).HasMaxLength(128).HasColumnName("sku").IsRequired();
             l.Property(p => p.ProductName).HasMaxLength(300).HasColumnName("product_name").IsRequired();
+            l.Property(p => p.ProductId).HasMaxLength(200).HasColumnName("product_id");
 
             // ✅ NEW columns
             l.Property(p => p.ProductCategory).HasMaxLength(200).HasColumnName("product_category");
+            l.Property(p => p.BrandName).HasMaxLength(200).HasColumnName("product_brand");
+            l.Property(p => p.CategoryNames)
+                .HasColumnName("product_categories")
+                .HasColumnType("text[]");
             l.Property(p => p.Barcode).HasMaxLength(128).HasColumnName("barcode");
             l.Property(p => p.OrderLineItemStatusName).HasMaxLength(120).HasColumnName("order_line_item_status_name");
 

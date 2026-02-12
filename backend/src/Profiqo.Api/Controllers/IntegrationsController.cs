@@ -36,7 +36,7 @@ public sealed class IntegrationsController : ControllerBase
 
         var result = new List<object>();
 
-        // For now: only Ikas. Later Trendyol/Shopify etc will follow same pattern.
+        // ikas
         var ikas = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Ikas, ct);
         if (ikas is not null)
         {
@@ -60,6 +60,8 @@ public sealed class IntegrationsController : ControllerBase
                 healthy = ikas.Status == ProviderConnectionStatus.Active
             });
         }
+
+        // Trendyol
         var trendyol = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Trendyol, ct);
         if (trendyol is not null)
         {
@@ -75,6 +77,7 @@ public sealed class IntegrationsController : ControllerBase
             });
         }
 
+        // WhatsApp
         var whatsapp = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Whatsapp, ct);
         if (whatsapp is not null)
         {
@@ -90,6 +93,21 @@ public sealed class IntegrationsController : ControllerBase
             });
         }
 
+        // Pixel (Storefront Events)
+        var pixel = await _connections.GetByProviderAsync(tenantId.Value, ProviderType.Pixel, ct);
+        if (pixel is not null)
+        {
+            result.Add(new
+            {
+                provider = "pixel",
+                connectionId = pixel.Id.Value,
+                status = pixel.Status.ToString(),
+                displayName = pixel.DisplayName,
+                externalAccountId = pixel.ExternalAccountId,
+                cursors = (object?)null,
+                healthy = pixel.Status == ProviderConnectionStatus.Active
+            });
+        }
 
         return Ok(new { items = result });
     }

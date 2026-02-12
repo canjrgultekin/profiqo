@@ -53,6 +53,15 @@ function providerMeta(p: string): {
       bgColor: "bg-green/10 border-green/20",
       route: "/integrations/whatsapp",
     };
+  if (lower === "pixel")
+    return {
+      label: "Storefront Pixel",
+      icon: "📡",
+      desc: "Event Tracking Script",
+      color: "text-purple-500",
+      bgColor: "bg-purple-500/10 border-purple-500/20",
+      route: "/integrations/ikas",
+    };
   return {
     label: p,
     icon: "🔌",

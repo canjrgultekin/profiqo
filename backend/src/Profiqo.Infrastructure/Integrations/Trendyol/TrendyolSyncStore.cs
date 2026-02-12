@@ -107,7 +107,18 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
                 var barcode = string.IsNullOrWhiteSpace(l.Barcode) ? null : l.Barcode.Trim();
                 var statusName = string.IsNullOrWhiteSpace(l.OrderLineItemStatusName) ? null : l.OrderLineItemStatusName.Trim();
 
-                return new OrderLine(sku, name, qty, unitMoney, productCategory, barcode, discountMoney, statusName);
+                return new OrderLine(
+                    sku: sku,
+                    productName: name,
+                    quantity: qty,
+                    unitPrice: unitMoney,
+                    productCategory: productCategory,
+                    brandName: null,
+                    categoryNames: null,
+                    barcode: barcode,
+                    discount: discountMoney,
+                    orderLineItemStatusName: statusName
+                );
             })
             .ToList();
 

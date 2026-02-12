@@ -16,7 +16,7 @@ public interface IIkasSyncProcessor
 {
     Task<int> SyncCustomersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
     Task<int> SyncOrdersAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
- //   Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
+    Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct);
 }
 
 public sealed class IkasSyncProcessor : IIkasSyncProcessor
@@ -116,7 +116,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     EmailNormalized: emailNorm,
                     EmailHashSha256: string.IsNullOrWhiteSpace(emailNorm) ? null : Sha256Hex(emailNorm),
                     PhoneNormalized: phoneNorm,
-                    PhoneHashSha256: string.IsNullOrWhiteSpace(phoneNorm) ? null : Sha256Hex(phoneNorm));
+                    PhoneHashSha256: string.IsNullOrWhiteSpace(phoneNorm) ? null : Sha256Hex(phoneNorm),
+                    ProviderCustomerJson: c.GetRawText());
 
                 await _store.UpsertCustomerAsync(tenantId, model, ct);
                 processed++;
@@ -196,8 +197,12 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
                 string? emailNorm = null, emailHash = null, phoneNorm = null, phoneHash = null;
 
+                string? providerCustomerJson = null;
+
                 if (o.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
                 {
+                    providerCustomerJson = cust.GetRawText();
+
                     var email = ReadString(cust, "email");
                     var phone = ReadString(cust, "phone");
 
@@ -229,6 +234,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                         string? productId = null;
 
                         string? productCategory = null;
+                        string? brandName = null;
+                        var categoryNames = new List<string>();
                         string? barcode = null;
 
                         if (li.TryGetProperty("variant", out var v) && v.ValueKind == JsonValueKind.Object)
@@ -238,11 +245,20 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                             sku = ReadString(v, "sku");
                             productName = ReadString(v, "name") ?? productName;
 
+                            if (v.TryGetProperty("brand", out var br) && br.ValueKind == JsonValueKind.Object)
+                                brandName = ReadString(br, "name");
+
                             if (v.TryGetProperty("categories", out var cats) && cats.ValueKind == JsonValueKind.Array && cats.GetArrayLength() > 0)
                             {
-                                var c0 = cats[0];
-                                if (c0.ValueKind == JsonValueKind.Object)
-                                    productCategory = ReadString(c0, "name");
+                                foreach (var cat in cats.EnumerateArray())
+                                {
+                                    if (cat.ValueKind != JsonValueKind.Object) continue;
+                                    var n = ReadString(cat, "name");
+                                    if (!string.IsNullOrWhiteSpace(n)) categoryNames.Add(n!.Trim());
+                                }
+
+                                // Backward-compat: existing column expects a single value
+                                productCategory = categoryNames.Count > 0 ? categoryNames[0] : null;
                             }
 
                             if (v.TryGetProperty("barcodeList", out var bl) && bl.ValueKind == JsonValueKind.Array && bl.GetArrayLength() > 0)
@@ -263,6 +279,8 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                             ProviderVariantId: variantId,
                             ProviderProductId: productId,
                             ProductCategory: productCategory,
+                            BrandName: string.IsNullOrWhiteSpace(brandName) ? null : brandName.Trim(),
+                            CategoryNames: categoryNames,
                             Barcode: barcode,
                             Discount: discount,
                             OrderLineItemStatusName: lineStatus));
@@ -284,6 +302,7 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
                     CurrencyCode: currency,
                     TotalFinalPrice: totalFinal,
                     OrderStatus: orderStatus,
+                    ProviderCustomerJson: providerCustomerJson,
                     CustomerEmailNormalized: emailNorm,
                     CustomerEmailHashSha256: emailHash,
                     CustomerPhoneNormalized: phoneNorm,
@@ -305,6 +324,115 @@ public sealed class IkasSyncProcessor : IIkasSyncProcessor
 
         var nextCursor = maxSeenUpdatedAt > 0 ? maxSeenUpdatedAt : nowMs;
         await _cursors.UpsertAsync(tenantId, connId, OrderCursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
+
+        return processed;
+    }
+
+    public async Task<int> SyncAbandonedCheckoutsAsync(Guid jobId, TenantId tenantId, Guid connectionId, int pageSize, int maxPages, CancellationToken ct)
+    {
+        var connId = new ProviderConnectionId(connectionId);
+        var conn = await _connections.GetByIdAsync(connId, ct);
+        if (conn is null || conn.TenantId != tenantId || conn.ProviderType != ProviderType.Ikas)
+            throw new InvalidOperationException("Ikas connection not found for tenant.");
+
+        var (storeName, token) = await GetAuthAsync(conn, ct);
+
+        const string cursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
+
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var initialCutoffMs = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
+
+        var cursorMs = await GetCursorMsOrNull(tenantId, connId, cursorKey, ct);
+        var gteMs = cursorMs ?? initialCutoffMs;
+
+        var processed = 0;
+        long maxSeen = cursorMs ?? 0;
+
+        for (var page = 1; page <= maxPages; page++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            using var doc = await _ikas.ListAbandonedCheckoutsAsync(storeName, token, page, pageSize, gteMs, ct);
+
+            var list = doc.RootElement.GetProperty("data").GetProperty("listAbandonedCheckouts");
+            var data = list.GetProperty("data");
+
+            if (data.ValueKind != JsonValueKind.Array || data.GetArrayLength() == 0)
+                break;
+
+            var stopAll = false;
+
+            foreach (var a in data.EnumerateArray())
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var externalId = ReadString(a, "id") ?? Guid.NewGuid().ToString("N");
+                var status = ReadString(a, "status");
+
+                long lastActivity = 0;
+                string? currency = null;
+                decimal? totalPrice = null;
+
+                if (a.TryGetProperty("cart", out var cart) && cart.ValueKind == JsonValueKind.Object)
+                {
+                    lastActivity = ReadInt64(cart, "lastActivityDate") ?? 0L;
+                    currency = ReadString(cart, "currencyCode");
+                    totalPrice = ReadDecimal(cart, "totalPrice");
+                }
+
+                if (lastActivity <= 0)
+                {
+                    var updatedAt = ReadInt64(a, "updatedAt") ?? 0L;
+                    lastActivity = updatedAt > 0 ? updatedAt : nowMs;
+                }
+
+                if (lastActivity > 0 && lastActivity < gteMs)
+                {
+                    stopAll = true;
+                    break;
+                }
+
+                if (lastActivity > maxSeen) maxSeen = lastActivity;
+
+                string? email = null;
+                string? phone = null;
+
+                if (a.TryGetProperty("customer", out var cust) && cust.ValueKind == JsonValueKind.Object)
+                {
+                    email = NormalizeEmail(ReadString(cust, "email"));
+                    phone = NormalizePhone(ReadString(cust, "phone"));
+                }
+
+                var payloadJson = a.GetRawText();
+
+                await _store.UpsertAbandonedCheckoutAsync(
+                    tenantId,
+                    connId,
+                    new IkasAbandonedCheckoutUpsert(
+                        ExternalId: externalId,
+                        LastActivityDateMs: lastActivity,
+                        CurrencyCode: currency,
+                        TotalFinalPrice: totalPrice,
+                        Status: status,
+                        CustomerEmail: string.IsNullOrWhiteSpace(email) ? null : email,
+                        CustomerPhone: string.IsNullOrWhiteSpace(phone) ? null : phone,
+                        PayloadJson: payloadJson),
+                    ct);
+
+                processed++;
+
+                if (processed % 25 == 0)
+                    await _jobs.MarkProgressAsync(jobId, processed, ct);
+            }
+
+            await _jobs.MarkProgressAsync(jobId, processed, ct);
+
+            var hasNext = ReadBoolean(list, "hasNext");
+            if (!hasNext || stopAll) break;
+        }
+
+        var nextCursor = maxSeen > 0 ? (maxSeen + 1) : (nowMs + 1);
+        await _cursors.UpsertAsync(tenantId, connId, cursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
 
         return processed;
     }

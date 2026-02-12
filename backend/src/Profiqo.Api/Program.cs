@@ -24,9 +24,11 @@ using Profiqo.Application;
 using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Security;
 using Profiqo.Application.Abstractions.Tenancy;
+using Profiqo.Application.StorefrontEvents;
 using Profiqo.Infrastructure.Integrations.Ikas;
 using Profiqo.Infrastructure.Integrations.Whatsapp;
 using Profiqo.Infrastructure.Persistence;
+using Profiqo.Infrastructure.Persistence.Repositories;
 
 using Serilog;
 
@@ -81,6 +83,45 @@ builder.Services.AddProfiqoApplication();
 builder.Services.AddProfiqoPersistence(builder.Configuration);
 builder.Services.AddIkasIntegration(builder.Configuration);
 builder.Services.AddWhatsappIntegration(builder.Configuration);
+
+// ── Storefront Events (Pixel) ──
+builder.Services.AddMemoryCache();
+builder.Services.Configure<StorefrontEventsOptions>(
+    builder.Configuration.GetSection("Profiqo:StorefrontEvents"));
+builder.Services.AddScoped<IPixelTenantResolver, PixelTenantResolver>();
+builder.Services.AddScoped<IWebEventRepository, WebEventRepository>();
+builder.Services.AddScoped<IStorefrontEventService, StorefrontEventService>();
+
+// ── Storefront CORS ──
+var sfOptions = builder.Configuration
+    .GetSection("Profiqo:StorefrontEvents")
+    .Get<StorefrontEventsOptions>() ?? new StorefrontEventsOptions();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("StorefrontPolicy", policy =>
+    {
+        policy.SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrWhiteSpace(origin)) return false;
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+                var host = uri.Host;
+                foreach (var pattern in sfOptions.AllowedOrigins)
+                {
+                    if (pattern == "localhost" && (host == "localhost" || host == "127.0.0.1"))
+                        return true;
+                    if (pattern.StartsWith("*.") && host.EndsWith(pattern[1..]))
+                        return true;
+                    if (host.Equals(pattern, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            })
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -171,6 +212,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseRateLimiter();
+app.UseCors("StorefrontPolicy");
 
 app.UseAuthentication();
 app.UseAuthorization();

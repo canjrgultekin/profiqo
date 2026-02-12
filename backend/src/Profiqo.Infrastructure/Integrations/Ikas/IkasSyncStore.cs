@@ -76,6 +76,20 @@ public sealed class IkasSyncStore : IIkasSyncStore
             now,
             ct);
 
+        // ✅ Provider profile snapshot (Ikas payload) -> customers.provider_profile_json (shadow column)
+        if (!string.IsNullOrWhiteSpace(model.ProviderCustomerJson))
+        {
+            var customer = await _db.Customers
+                .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.Id == customerId, ct);
+
+            if (customer is not null)
+            {
+                _db.Entry(customer)
+                    .Property("ProviderProfileJson")
+                    .CurrentValue = model.ProviderCustomerJson;
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
         return customerId;
     }
@@ -155,6 +169,9 @@ public sealed class IkasSyncStore : IIkasSyncStore
             _db.Entry(existing).Property("BillingAddressJson").CurrentValue =
                 string.IsNullOrWhiteSpace(model.BillingAddressJson) ? null : model.BillingAddressJson;
 
+            _db.Entry(existing).Property("ProviderCustomerJson").CurrentValue =
+                string.IsNullOrWhiteSpace(model.ProviderCustomerJson) ? null : model.ProviderCustomerJson;
+
             await _db.SaveChangesAsync(ct);
             return existing.Id;
         }
@@ -211,6 +228,10 @@ public sealed class IkasSyncStore : IIkasSyncStore
                     quantity: l.Quantity <= 0 ? 1 : l.Quantity,
                     unitPrice: unitPriceMoney,
                     productCategory: string.IsNullOrWhiteSpace(l.ProductCategory) ? null : l.ProductCategory.Trim(),
+                    productId: string.IsNullOrWhiteSpace(l.ProviderProductId) ? null : l.ProviderProductId.Trim(),
+
+                    brandName: string.IsNullOrWhiteSpace(l.BrandName) ? null : l.BrandName.Trim(),
+                    categoryNames: l.CategoryNames is null || l.CategoryNames.Count == 0 ? null : l.CategoryNames,
                     barcode: string.IsNullOrWhiteSpace(l.Barcode) ? null : l.Barcode.Trim(),
                     discount: discountMoney,
                     orderLineItemStatusName: string.IsNullOrWhiteSpace(l.OrderLineItemStatusName) ? null : l.OrderLineItemStatusName.Trim()
@@ -224,7 +245,10 @@ public sealed class IkasSyncStore : IIkasSyncStore
                 productName: "ikas order",
                 quantity: 1,
                 unitPrice: new Money(model.TotalFinalPrice, currency),
+                productId: null,
                 productCategory: null,
+                brandName: null,
+                categoryNames: null,
                 barcode: null,
                 discount: Money.Zero(currency),
                 orderLineItemStatusName: null
@@ -254,6 +278,9 @@ public sealed class IkasSyncStore : IIkasSyncStore
 
         _db.Entry(order).Property("BillingAddressJson").CurrentValue =
             string.IsNullOrWhiteSpace(model.BillingAddressJson) ? null : model.BillingAddressJson;
+
+        _db.Entry(order).Property("ProviderCustomerJson").CurrentValue =
+            string.IsNullOrWhiteSpace(model.ProviderCustomerJson) ? null : model.ProviderCustomerJson;
 
         await _db.SaveChangesAsync(ct);
 

@@ -32,6 +32,11 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired().IsConcurrencyToken();
 
+        // Provider snapshot payload (latest known). Used by Ikas sync today.
+        builder.Property<string?>("ProviderProfileJson")
+            .HasColumnName("provider_profile_json")
+            .HasColumnType("jsonb");
+
         builder.HasIndex(x => new { x.TenantId, x.LastSeenAtUtc });
 
         builder.OwnsOne(x => x.Rfm, rfm =>

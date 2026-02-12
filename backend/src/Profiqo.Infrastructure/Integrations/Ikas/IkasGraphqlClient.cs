@@ -132,7 +132,7 @@ query listOrder(
       salesChannelId
       salesChannel { id name type }
 
-      customer { id email firstName lastName isGuestCheckout phone }
+      customer { id email firstName lastName isGuestCheckout phone fullName }
       customerId
       orderLineItems {
         id

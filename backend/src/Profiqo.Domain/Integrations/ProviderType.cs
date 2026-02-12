@@ -4,5 +4,7 @@ public enum ProviderType
 {
     Ikas = 1,
     Trendyol = 2,
-    Whatsapp = 3
+    Whatsapp = 3,
+    Pixel = 4
+
 }

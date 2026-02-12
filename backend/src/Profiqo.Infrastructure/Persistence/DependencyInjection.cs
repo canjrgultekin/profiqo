@@ -87,6 +87,7 @@ public static class DependencyInjection
             Profiqo.Infrastructure.Persistence.Repositories.WhatsappJobRepository>();
         services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappDispatchRepository,
             Profiqo.Infrastructure.Persistence.Repositories.WhatsappDispatchRepository>();
+        
 
         return services;
     }

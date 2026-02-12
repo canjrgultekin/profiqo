@@ -40,6 +40,7 @@ public sealed class ProfiqoDbContext : DbContext
     public DbSet<WhatsappJobRow> WhatsappJobs => Set<WhatsappJobRow>();
     public DbSet<WhatsappDispatchQueueRow> WhatsappDispatchQueue => Set<WhatsappDispatchQueueRow>();
     public DbSet<WhatsappOrderEventRow> WhatsappOrderEvents => Set<WhatsappOrderEventRow>();
+    public DbSet<WebEvent> WebEvents => Set<WebEvent>();
 
     public ProfiqoDbContext(DbContextOptions<ProfiqoDbContext> options, ITenantContext tenantContext)
         : base(options)

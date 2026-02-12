@@ -9,7 +9,8 @@ public sealed record IkasCustomerUpsert(
     string? EmailNormalized,
     string? EmailHashSha256,
     string? PhoneNormalized,
-    string? PhoneHashSha256);
+    string? PhoneHashSha256,
+    string ProviderCustomerJson);
 
 public sealed record IkasOrderLineUpsert(
     string? Sku,
@@ -21,6 +22,8 @@ public sealed record IkasOrderLineUpsert(
     string? ProviderVariantId,
     string? ProviderProductId,
     string? ProductCategory,
+    string? BrandName,
+    IReadOnlyList<string> CategoryNames,
     string? Barcode,
     decimal Discount,
     string? OrderLineItemStatusName);
@@ -32,6 +35,7 @@ public sealed record IkasOrderUpsert(
     string CurrencyCode,
     decimal TotalFinalPrice,
     string? OrderStatus, // ✅ NEW: Ikas order status string
+    string? ProviderCustomerJson,
     string? CustomerEmailNormalized,
     string? CustomerEmailHashSha256,
     string? CustomerPhoneNormalized,
@@ -54,5 +58,5 @@ public interface IIkasSyncStore
 {
     Task<CustomerId> UpsertCustomerAsync(TenantId tenantId, IkasCustomerUpsert model, CancellationToken ct);
     Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct);
-   // Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct);
+    Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct);
 }

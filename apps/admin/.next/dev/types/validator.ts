@@ -551,6 +551,42 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../../src/app/api/integrations/pixel/connect/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/pixel/connect">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/pixel/connect/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../src/app/api/integrations/pixel/connection/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/pixel/connection">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/pixel/connection/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../src/app/api/integrations/pixel/rotate-key/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/pixel/rotate-key">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/pixel/rotate-key/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../src/app/api/integrations/pixel/script-tag/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/pixel/script-tag">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/pixel/script-tag/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../../src/app/api/integrations/status/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/status">> = Specific
