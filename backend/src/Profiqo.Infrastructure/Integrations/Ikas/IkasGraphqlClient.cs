@@ -231,7 +231,7 @@ query listOrder(
                 pagination = new { page, limit },
                 search = (string?)null,
                 sort = "-orderedAt"
-           //     updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
+                //     updatedAt = orderedAtGteMs.HasValue ? new { gte = orderedAtGteMs.Value } : null
             }
         };
 
@@ -298,7 +298,78 @@ query listAbandonedCheckouts (
         return PostAsync(storeName, accessToken, op, payload, ct);
     }
 
+    public Task<JsonDocument> ListProductsAsync(string storeName, string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct)
 
+    {
+        const string op = "listProduct";
+
+        var payload = new
+        {
+            operationName = op,
+            query = @"
+query listProduct(
+  $pagination: PaginationInput,
+  $sort: String
+) {
+  listProduct(
+    pagination: $pagination,
+    sort: $sort
+  ) {
+    count
+    page
+    limit
+    hasNext
+    data {
+      brandId
+      brand {
+        name
+        id
+      }
+      categoryIds
+      categories {
+        name
+        id
+      }
+      description
+      id
+      name
+      totalStock
+      createdAt
+      variants {
+        id
+        hsCode
+        createdAt
+        barcodeList
+        prices {
+          buyPrice
+          currency
+          currencyCode
+          discountPrice
+          sellPrice
+        }
+        sku
+        sellIfOutOfStock
+        stocks {
+          stockCount
+          productId
+          id
+          variantId
+        }
+      }
+      productVolumeDiscountId
+      updatedAt
+    }
+  }
+}",
+            variables = new
+            {
+                pagination = new { page, limit },
+                sort = "-updatedAt"
+            }
+        };
+
+        return PostAsync(storeName, accessToken, op, payload, ct);
+    }
     private async Task<JsonDocument> PostAsync(string storeName, string accessToken, string op, object body, CancellationToken ct)
     {
         var endpoint = "https://api.myikas.com/api/v1/admin/graphql"; //ResolveGraphqlEndpoint(storeName);

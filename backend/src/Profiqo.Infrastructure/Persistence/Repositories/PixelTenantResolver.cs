@@ -20,7 +20,7 @@ public sealed class PixelTenantResolver : IPixelTenantResolver
     private readonly IMemoryCache _cache;
     private readonly ILogger<PixelTenantResolver> _logger;
 
-    private static readonly TimeSpan ValidCacheDuration = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ValidCacheDuration = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan InvalidCacheDuration = TimeSpan.FromSeconds(30);
 
     public PixelTenantResolver(ProfiqoDbContext db, IMemoryCache cache, ILogger<PixelTenantResolver> logger)

@@ -53,10 +53,34 @@ public sealed record IkasAbandonedCheckoutUpsert(
     string? CustomerEmail,
     string? CustomerPhone,
     string PayloadJson);
+public sealed record IkasProductVariantUpsert(
+    string ProviderVariantId,
+    string? Sku,
+    string? HsCode,
+    string? BarcodeListJson,
+    bool? SellIfOutOfStock,
+    string PricesJson,
+    string StocksJson,
+    long ProviderCreatedAtMs);
+
+public sealed record IkasProductUpsert(
+    string ProviderProductId,
+    string Name,
+    string? Description,
+    string? BrandId,
+    string? BrandName,
+    string? CategoryIdsJson,
+    string? CategoriesJson,
+    int TotalStock,
+    string? ProductVolumeDiscountId,
+    long ProviderCreatedAtMs,
+    long ProviderUpdatedAtMs,
+    IReadOnlyList<IkasProductVariantUpsert> Variants);
 
 public interface IIkasSyncStore
 {
     Task<CustomerId> UpsertCustomerAsync(TenantId tenantId, IkasCustomerUpsert model, CancellationToken ct);
     Task<OrderId> UpsertOrderAsync(TenantId tenantId, IkasOrderUpsert model, CancellationToken ct);
     Task UpsertAbandonedCheckoutAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasAbandonedCheckoutUpsert model, CancellationToken ct);
+    Task UpsertProductAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasProductUpsert model, CancellationToken ct);
 }

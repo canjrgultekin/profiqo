@@ -11,4 +11,6 @@ public interface IIkasGraphqlClient
     Task<JsonDocument> ListOrdersAsync(string storeName, string accessToken, int page, int limit, long? orderedAtGteMs, CancellationToken ct);
 
     Task<JsonDocument> ListAbandonedCheckoutsAsync(string storeName, string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct);
+    Task<JsonDocument> ListProductsAsync(string storeName, string accessToken, int page, int limit, long? lastActivityGteMs, CancellationToken ct);
+
 }

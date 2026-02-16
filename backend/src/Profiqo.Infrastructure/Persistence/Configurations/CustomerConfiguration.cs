@@ -47,6 +47,7 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             rfm.Property(p => p.Segment).HasConversion<short>().HasColumnName("rfm_segment");
             rfm.Property(p => p.ComputedAtUtc).HasColumnName("rfm_computed_at_utc");
         });
+        builder.Navigation(x => x.Rfm).IsRequired(false);
 
         builder.OwnsOne(x => x.AiScores, ai =>
         {
@@ -56,6 +57,7 @@ internal sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             ai.Property(p => p.DiscountSensitivityScore).HasColumnName("ai_discount_sensitivity");
             ai.Property(p => p.ComputedAtUtc).HasColumnName("ai_computed_at_utc");
         });
+        builder.Navigation(x => x.AiScores).IsRequired(false);
 
         // Identities - FK tipi düzeltildi
         builder.Navigation(x => x.Identities).UsePropertyAccessMode(PropertyAccessMode.Field);

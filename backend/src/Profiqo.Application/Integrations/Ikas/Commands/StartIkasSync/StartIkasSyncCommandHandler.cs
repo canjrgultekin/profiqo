@@ -17,6 +17,7 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
     private const string CustomerCursorKey = "ikas.customers.cursor.updatedAtMs";
     private const string OrderCursorKey = "ikas.orders.cursor.updatedAtMs";
     private const string AbandonedCursorKey = "ikas.abandoned.cursor.lastActivityDateMs";
+    private const string ProductCursorKey = "ikas.products.cursor.updatedAtMs";
 
     private const int DefaultMaxPagesInitial = 200;
     private const int DefaultMaxPagesSubsequent = 20;
@@ -63,6 +64,7 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
             var wantsCustomers = scopeRaw is "customers" or "both";
             var wantsOrders = scopeRaw is "orders" or "both";
             var wantsAbandoned = scopeRaw is "abandoned" or "both";
+            var wantsProducts = scopeRaw is "products" or "both";
 
             var isInitial = false;
 
@@ -83,7 +85,11 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
                 var c = await _cursors.GetAsync(tenantId.Value, connId, AbandonedCursorKey, ct);
                 if (!long.TryParse(c, out var ms) || ms <= 0) isInitial = true;
             }
-
+            if (!isInitial && wantsProducts)
+            {
+                var c = await _cursors.GetAsync(tenantId.Value, connId, ProductCursorKey, ct);
+                if (!long.TryParse(c, out var ms) || ms <= 0) isInitial = true;
+            }
             maxPages = isInitial ? DefaultMaxPagesInitial : DefaultMaxPagesSubsequent;
         }
 
@@ -130,7 +136,18 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
 
             created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncAbandonedCheckouts)));
         }
+        if (scope is "products" or "both")
+        {
+            var jobId = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncProducts,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
 
+            created.Add(new StartIkasSyncJob(jobId, nameof(IntegrationJobKind.IkasSyncProducts)));
+        }
         if (created.Count == 0)
         {
             var jobId1 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
@@ -162,6 +179,17 @@ internal sealed class StartIkasSyncCommandHandler : IRequestHandler<StartIkasSyn
                 MaxPages: maxPages), ct);
 
             created.Add(new StartIkasSyncJob(jobId3, nameof(IntegrationJobKind.IkasSyncAbandonedCheckouts)));
+
+
+            var jobId4 = await _jobs.CreateAsync(new IntegrationJobCreateRequest(
+                BatchId: batchId,
+                TenantId: tenantId.Value.Value,
+                ConnectionId: request.ConnectionId,
+                Kind: IntegrationJobKind.IkasSyncProducts,
+                PageSize: pageSize,
+                MaxPages: maxPages), ct);
+
+            created.Add(new StartIkasSyncJob(jobId4, nameof(IntegrationJobKind.IkasSyncProducts)));
         }
 
         return new StartIkasSyncResult(batchId, created);

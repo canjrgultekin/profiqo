@@ -109,6 +109,7 @@ internal sealed class SyncAutomationSchedulerWorker : BackgroundService
                                 await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncCustomers, rule.PageSize, rule.MaxPages), stoppingToken);
                                 await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncOrders, rule.PageSize, rule.MaxPages), stoppingToken);
                                 await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncAbandonedCheckouts, rule.PageSize, rule.MaxPages), stoppingToken);
+                                await jobs.CreateAsync(new IntegrationJobCreateRequest(batchId, tenantGuid, cid, IntegrationJobKind.IkasSyncProducts, rule.PageSize, rule.MaxPages), stoppingToken);
                             }
                             else if (conn.ProviderType == ProviderType.Trendyol)
                             {

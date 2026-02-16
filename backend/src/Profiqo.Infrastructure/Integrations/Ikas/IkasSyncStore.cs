@@ -540,7 +540,96 @@ public sealed class IkasSyncStore : IIkasSyncStore
 
         await _db.SaveChangesAsync(ct);
     }
+    public async Task UpsertProductAsync(TenantId tenantId, ProviderConnectionId connectionId, IkasProductUpsert model, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var providerType = (short)ProviderType.Ikas;
+        var tenantGuid = tenantId.Value;
 
+        var productSet = _db.Set<ProductRow>();
+        var variantSet = _db.Set<ProductVariantRow>();
+
+        var existing = await productSet.FirstOrDefaultAsync(
+            x => x.TenantId == tenantGuid && x.ProviderProductId == model.ProviderProductId, ct);
+
+        Guid productId;
+
+        if (existing is null)
+        {
+            productId = Guid.NewGuid();
+            var row = new ProductRow(
+                id: productId,
+                tenantId: tenantGuid,
+                providerProductId: model.ProviderProductId,
+                name: model.Name,
+                description: model.Description,
+                brandId: model.BrandId,
+                brandName: model.BrandName,
+                categoryIdsJson: model.CategoryIdsJson,
+                categoriesJson: model.CategoriesJson,
+                totalStock: model.TotalStock,
+                productVolumeDiscountId: model.ProductVolumeDiscountId,
+                providerCreatedAtMs: model.ProviderCreatedAtMs,
+                providerUpdatedAtMs: model.ProviderUpdatedAtMs,
+                nowUtc: now);
+
+            await productSet.AddAsync(row, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+        else
+        {
+            productId = existing.Id;
+            existing.Update(
+                name: model.Name,
+                description: model.Description,
+                brandId: model.BrandId,
+                brandName: model.BrandName,
+                categoryIdsJson: model.CategoryIdsJson,
+                categoriesJson: model.CategoriesJson,
+                totalStock: model.TotalStock,
+                productVolumeDiscountId: model.ProductVolumeDiscountId,
+                providerUpdatedAtMs: model.ProviderUpdatedAtMs,
+                nowUtc: now);
+        }
+
+        foreach (var v in model.Variants)
+        {
+            var existingVariant = await variantSet.FirstOrDefaultAsync(
+                x => x.TenantId == tenantGuid && x.ProviderVariantId == v.ProviderVariantId, ct);
+
+            if (existingVariant is null)
+            {
+                var vRow = new ProductVariantRow(
+                    id: Guid.NewGuid(),
+                    tenantId: tenantGuid,
+                    productId: productId,
+                    providerVariantId: v.ProviderVariantId,
+                    sku: v.Sku,
+                    hsCode: v.HsCode,
+                    barcodeListJson: v.BarcodeListJson,
+                    sellIfOutOfStock: v.SellIfOutOfStock,
+                    pricesJson: v.PricesJson,
+                    stocksJson: v.StocksJson,
+                    providerCreatedAtMs: v.ProviderCreatedAtMs,
+                    nowUtc: now);
+
+                await variantSet.AddAsync(vRow, ct);
+            }
+            else
+            {
+                existingVariant.Update(
+                    sku: v.Sku,
+                    hsCode: v.HsCode,
+                    barcodeListJson: v.BarcodeListJson,
+                    sellIfOutOfStock: v.SellIfOutOfStock,
+                    pricesJson: v.PricesJson,
+                    stocksJson: v.StocksJson,
+                    nowUtc: now);
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
     private static string Sha256Hex(string value)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
