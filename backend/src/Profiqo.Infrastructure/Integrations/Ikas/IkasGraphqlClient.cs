@@ -370,9 +370,84 @@ query listProduct(
 
         return PostAsync(storeName, accessToken, op, payload, ct);
     }
-    private async Task<JsonDocument> PostAsync(string storeName, string accessToken, string op, object body, CancellationToken ct)
+
+    // ── Storefront yönetimi (v2 API) ──────────────────────────────
+
+    public async Task<JsonDocument> ListStorefrontsAsync(string storeName, string accessToken, CancellationToken ct)
     {
-        var endpoint = "https://api.myikas.com/api/v1/admin/graphql"; //ResolveGraphqlEndpoint(storeName);
+        const string op = "listStorefront";
+
+        var payload = new
+        {
+            operationName = op,
+            query = @"
+query listStorefront {
+  listStorefront {
+    createdAt
+    deleted
+    id
+    name
+    routings {
+      countryCodes
+      createdAt
+      currencyCode
+      currencySymbol
+      deleted
+      domain
+      id
+      locale
+      path
+      updatedAt
+    }
+    salesChannelId
+    updatedAt
+  }
+}",
+            variables = new { }
+        };
+
+        return await PostAsync(storeName, accessToken, op, payload, ct, "v2");
+    }
+
+    public async Task<JsonDocument> SaveStorefrontJSScriptAsync(
+        string storeName,
+        string accessToken,
+        string storefrontId,
+        string scriptContent,
+        string scriptName,
+        bool isHighPriority,
+        CancellationToken ct)
+    {
+        const string op = "saveStorefrontJSScript";
+
+        var payload = new
+        {
+            query = @"mutation SaveStorefrontJSScript($input: StorefrontJSScriptInput!) {
+  saveStorefrontJSScript(input: $input) {
+    id
+  }
+}",
+            variables = new
+            {
+                input = new
+                {
+                    contentType = "SCRIPT",
+                    fileName = "",
+                    isHighPriority,
+                    name = scriptName,
+                    scriptContent,
+                    storefrontId
+                }
+            }
+        };
+
+        // saveStorefrontJSScript → /api/v1/admin/graphql
+        return await PostAsync(storeName, accessToken, op, payload, ct, "v1");
+    }
+
+    private async Task<JsonDocument> PostAsync(string storeName, string accessToken, string op, object body, CancellationToken ct, string apiVersion = "v1")
+    {
+        var endpoint = $"https://api.myikas.com/api/{apiVersion}/admin/graphql";
         var url = QueryHelpers.AddQueryString(endpoint, "op", op);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url);

@@ -1,14 +1,5 @@
 {
-  "/api/customers/route": "app/api/customers/route.js",
-  "/api/integrations/status/route": "app/api/integrations/status/route.js",
   "/api/integrations/ikas/connection/route": "app/api/integrations/ikas/connection/route.js",
-  "/api/integrations/pixel/connection/route": "app/api/integrations/pixel/connection/route.js",
-  "/api/integrations/pixel/script-tag/route": "app/api/integrations/pixel/script-tag/route.js",
-  "/(dashboard)/orders/page": "app/(dashboard)/orders/page.js",
-  "/(dashboard)/customers/page": "app/(dashboard)/customers/page.js",
-  "/(dashboard)/integrations/trendyol/page": "app/(dashboard)/integrations/trendyol/page.js",
-  "/(dashboard)/customers/dedupe/page": "app/(dashboard)/customers/dedupe/page.js",
-  "/(dashboard)/page": "app/(dashboard)/page.js",
-  "/(dashboard)/integrations/page": "app/(dashboard)/integrations/page.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
   "/(dashboard)/integrations/ikas/page": "app/(dashboard)/integrations/ikas/page.js"
 }

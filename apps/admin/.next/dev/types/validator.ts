@@ -524,6 +524,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../../src/app/api/integrations/ikas/install-script/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/ikas/install-script">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/ikas/install-script/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../../src/app/api/integrations/ikas/jobs/[jobId]/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/ikas/jobs/[jobId]">> = Specific
@@ -537,6 +546,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/ikas/jobs/batch/[batchId]">> = Specific
   const handler = {} as typeof import("../../../src/app/api/integrations/ikas/jobs/batch/[batchId]/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../src/app/api/integrations/ikas/storefronts/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/integrations/ikas/storefronts">> = Specific
+  const handler = {} as typeof import("../../../src/app/api/integrations/ikas/storefronts/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

@@ -41,7 +41,7 @@ internal sealed class TrendyolClient : ITrendyolClient
 
         var url =
             $"{baseUrl}{prefix}/order/sellers/{Uri.EscapeDataString(sellerId)}/orders" +
-            $"?startDate={startDateMs}&endDate={endDateMs}" +
+            //$"?startDate={startDateMs}&endDate={endDateMs}" +
             $"&page={safePage}&size={safeSize}" +
             $"&orderByField={Uri.EscapeDataString(string.IsNullOrWhiteSpace(orderByField) ? _opts.OrderByField : orderByField)}";
 

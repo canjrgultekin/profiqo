@@ -1,6 +1,7 @@
+// Path: apps/admin/src/app/(dashboard)/integrations/ikas/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -9,6 +10,22 @@ type StartSyncResponse = { batchId: string; jobs: { jobId: string; kind: string 
 type JobStatus = "Queued" | "Running" | "Succeeded" | "Failed" | "Cancelled" | string;
 type IntegrationJobDto = { jobId: string; batchId: string; tenantId: string; connectionId: string; kind: string; status: JobStatus; pageSize: number; maxPages: number; processedItems: number; createdAtUtc: string; startedAtUtc?: string | null; finishedAtUtc?: string | null; lastError?: string | null };
 type BatchResponse = { batchId: string; jobs: IntegrationJobDto[] };
+
+type StorefrontRouting = {
+  id: string;
+  domain: string | null;
+  locale: string | null;
+  path: string | null;
+  currencyCode: string | null;
+  countryCodes: string[];
+};
+
+type Storefront = {
+  id: string;
+  name: string;
+  salesChannelId: string | null;
+  routings: StorefrontRouting[];
+};
 
 function normalizeStartSync(payload: any): StartSyncResponse {
   const batchId = payload?.batchId ?? payload?.BatchId ?? "";
@@ -40,6 +57,229 @@ const cardCls = "rounded-xl border border-stroke bg-white p-5 shadow-1 dark:bord
 const labelCls = "mb-1.5 block text-xs font-medium uppercase tracking-wider text-body-color dark:text-dark-6";
 const btnPrimary = "rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50";
 const btnOutline = "rounded-lg border border-stroke px-5 py-2.5 text-sm font-semibold text-dark hover:bg-gray-1 disabled:opacity-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2";
+
+// ═══════════════════════════════════════════════════════════════
+// Storefront Install Modal
+// ═══════════════════════════════════════════════════════════════
+
+function StorefrontInstallModal({
+  open,
+  onClose,
+  scriptTag,
+  onLog,
+}: {
+  open: boolean;
+  onClose: () => void;
+  scriptTag: string;
+  onLog: (msg: string) => void;
+}) {
+  const [storefronts, setStorefronts] = useState<Storefront[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Load storefronts when modal opens
+  useEffect(() => {
+    if (!open) return;
+    setResult(null);
+    setSelectedId(null);
+    setLoading(true);
+    (async () => {
+      try {
+        const res = await fetch("/api/integrations/ikas/storefronts", { cache: "no-store" });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          onLog(`HATA: Storefront listesi alınamadı — ${data?.message || res.status}`);
+          setStorefronts([]);
+          return;
+        }
+        const list: Storefront[] = (data?.storefronts || []).map((sf: any) => ({
+          id: sf.id || "",
+          name: sf.name || "",
+          salesChannelId: sf.salesChannelId || null,
+          routings: (sf.routings || []).map((r: any) => ({
+            id: r.id || "",
+            domain: r.domain || null,
+            locale: r.locale || null,
+            path: r.path || null,
+            currencyCode: r.currencyCode || null,
+            countryCodes: r.countryCodes || [],
+          })),
+        }));
+        setStorefronts(list);
+        if (list.length === 1) setSelectedId(list[0].id);
+        onLog(`${list.length} storefront bulundu.`);
+      } catch (e: any) {
+        onLog(`HATA: ${e.message}`);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [open]);
+
+  const handleInstall = async () => {
+    if (!selectedId || !scriptTag) return;
+    setInstalling(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/integrations/ikas/install-script", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          storefrontId: selectedId,
+          scriptContent: scriptTag,
+          scriptName: "ProfiqoPixel",
+          isHighPriority: true,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg = data?.message || `HTTP ${res.status}`;
+        setResult({ success: false, message: msg });
+        onLog(`HATA: Script yüklenemedi — ${msg}`);
+        return;
+      }
+      const sfName = storefronts.find((s) => s.id === selectedId)?.name || selectedId;
+      setResult({ success: true, message: `Script "${sfName}" mağazasına başarıyla yüklendi!` });
+      onLog(`Script yüklendi ✓ storefront=${sfName} scriptId=${data?.scriptId || "?"}`);
+    } catch (e: any) {
+      setResult({ success: false, message: e.message });
+      onLog(`HATA: ${e.message}`);
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="relative mx-4 w-full max-w-lg rounded-2xl border border-stroke bg-white p-6 shadow-2xl dark:border-dark-3 dark:bg-gray-dark"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-base">🚀</div>
+            <div>
+              <h3 className="text-base font-bold text-dark dark:text-white">Script'i Mağazaya Yükle</h3>
+              <p className="text-xs text-body-color dark:text-dark-6">Pixel script'ini ikas mağazanıza otomatik entegre edin.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-body-color transition-colors hover:bg-gray-1 hover:text-dark dark:text-dark-6 dark:hover:bg-dark-2 dark:hover:text-white">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M13.5 4.5L4.5 13.5M4.5 4.5L13.5 13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <span className="ml-3 text-sm text-body-color dark:text-dark-6">Mağazalar yükleniyor...</span>
+          </div>
+        ) : storefronts.length === 0 ? (
+          <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-6 text-center dark:border-yellow-900/30 dark:bg-yellow-900/10">
+            <p className="text-sm text-yellow-700 dark:text-yellow-400">Storefront bulunamadı. ikas API bağlantınızı kontrol edin.</p>
+          </div>
+        ) : result?.success ? (
+          /* Success State */
+          <div className="py-4">
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-5 text-center dark:border-green-900/30 dark:bg-green-900/10">
+              <div className="mb-2 text-3xl">✅</div>
+              <p className="text-sm font-medium text-green-700 dark:text-green-300">{result.message}</p>
+              <p className="mt-2 text-xs text-green-600 dark:text-green-400">Script otomatik olarak aktif edildi. Mağazanızda test edebilirsiniz.</p>
+            </div>
+            <button onClick={onClose} className={`mt-4 w-full ${btnPrimary}`}>Kapat</button>
+          </div>
+        ) : (
+          <>
+            {/* Storefront List */}
+            <div className="mb-4">
+              <label className={labelCls}>Online Mağaza Seçin</label>
+              <div className="max-h-60 space-y-2 overflow-y-auto">
+                {storefronts.map((sf) => {
+                  const isSelected = selectedId === sf.id;
+                  const routing = sf.routings[0];
+                  const domain = routing?.domain;
+                  const locale = routing?.locale;
+                  const countries = routing?.countryCodes?.join(", ");
+
+                  return (
+                    <button
+                      key={sf.id}
+                      onClick={() => setSelectedId(sf.id)}
+                      className={`w-full rounded-lg border px-4 py-3 text-left transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/5 ring-1 ring-primary/20 dark:border-primary dark:bg-primary/10"
+                          : "border-stroke hover:border-primary/40 hover:bg-gray-1/50 dark:border-dark-3 dark:hover:border-primary/30 dark:hover:bg-dark-2/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+                          isSelected ? "border-primary" : "border-stroke dark:border-dark-3"
+                        }`}>
+                          {isSelected && <div className="h-2.5 w-2.5 rounded-full bg-primary" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-dark dark:text-white">{sf.name}</span>
+                            {locale && (
+                              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-gray-600 dark:bg-dark-3 dark:text-dark-6">
+                                {locale}
+                              </span>
+                            )}
+                            {countries && (
+                              <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
+                                {countries}
+                              </span>
+                            )}
+                          </div>
+                          {domain && <div className="mt-0.5 truncate text-xs text-body-color dark:text-dark-6">{domain}</div>}
+                          <div className="mt-0.5 font-mono text-[10px] text-body-color/60 dark:text-dark-6/60">{sf.id}</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Error display */}
+            {result && !result.success && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/30 dark:bg-red-900/10">
+                <p className="text-xs text-red-600 dark:text-red-400">{result.message}</p>
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2.5 dark:border-blue-900/20 dark:bg-blue-900/5">
+              <p className="text-[11px] leading-relaxed text-blue-700 dark:text-blue-400">
+                Script seçilen mağazaya <strong>high priority</strong> olarak yüklenir ve otomatik aktif edilir.
+                Mağazanın <code className="rounded bg-blue-100 px-1 dark:bg-blue-900/30">&lt;head&gt;</code> bölümünde en üstte yer alır.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3">
+              <button onClick={onClose} className={`flex-1 ${btnOutline}`}>Vazgeç</button>
+              <button
+                onClick={handleInstall}
+                disabled={!selectedId || installing}
+                className={`flex-1 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50 ${
+                  installing ? "bg-yellow-500" : "bg-green-500 hover:opacity-90"
+                }`}
+              >
+                {installing ? "Yükleniyor..." : "Entegre Et"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ikas API Integration Section
@@ -243,7 +483,8 @@ function StorefrontPixelSection() {
   const [rotating, setRotating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [log, setLog] = useState("");
-  const append = (s: string) => setLog((x) => (x ? x + "\n" + s : s));
+  const append = useCallback((s: string) => setLog((x) => (x ? x + "\n" + s : s)), []);
+  const [showInstallModal, setShowInstallModal] = useState(false);
 
   // Load existing pixel connection
   useEffect(() => {
@@ -332,6 +573,14 @@ function StorefrontPixelSection() {
 
   return (
     <div className={cardCls}>
+      {/* Install Modal */}
+      <StorefrontInstallModal
+        open={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        scriptTag={scriptTag}
+        onLog={append}
+      />
+
       {/* Connection Status */}
       {hasConnection && (
         <div className="mb-5 flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 dark:border-green-900/40 dark:bg-green-900/10">
@@ -377,10 +626,11 @@ function StorefrontPixelSection() {
           <div className="mt-6 border-t border-stroke pt-5 dark:border-dark-3">
             <h4 className="mb-3 text-sm font-semibold text-dark dark:text-white">Script Tag</h4>
             <p className="mb-3 text-xs text-body-color dark:text-dark-6">
-              Bu kodu ikas admin panelinden mağazanızın <strong>Storefront Events</strong> veya <strong>Custom Scripts</strong> bölümüne yapıştırın.
+              Bu kodu ikas admin panelinden mağazanızın <strong>Custom Scripts</strong> bölümüne yapıştırın
+              veya <strong>"Mağazaya Yükle"</strong> butonuyla otomatik entegre edin.
             </p>
             <div className="relative">
-              <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-stroke bg-gray-1/50 p-4 pr-20 font-mono text-xs text-dark dark:border-dark-3 dark:bg-dark-2/50 dark:text-white">
+              <pre className="overflow-auto whitespace-pre-wrap rounded-lg border border-stroke bg-gray-1/50 p-4 pr-24 font-mono text-xs text-dark dark:border-dark-3 dark:bg-dark-2/50 dark:text-white">
                 {scriptTag || "<script> henüz oluşturulmadı — önce bağlantı kurun </script>"}
               </pre>
               <button
@@ -390,6 +640,16 @@ function StorefrontPixelSection() {
                 {copied === "script" ? "Kopyalandı ✓" : "Kopyala"}
               </button>
             </div>
+
+            {/* ── Mağazaya Yükle butonu ── */}
+            <button
+              onClick={() => setShowInstallModal(true)}
+              disabled={!scriptTag}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-green-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v10m0 0L4.5 7.5M8 11l3.5-3.5M2 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Mağazaya Yükle
+            </button>
           </div>
 
           <div className="mt-5">
@@ -436,10 +696,10 @@ function StorefrontPixelSection() {
           <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900/30 dark:bg-blue-900/10">
             <h4 className="mb-2 text-sm font-semibold text-blue-800 dark:text-blue-300">Kurulum Rehberi</h4>
             <ol className="space-y-1.5 text-xs text-blue-700 dark:text-blue-400">
-              <li><strong>1.</strong> Yukarıdaki script tag'i kopyalayın.</li>
-              <li><strong>2.</strong> ikas admin panelinize gidin → <strong>Online Mağaza</strong> → <strong>Tema Düzenle</strong> → Gelişmiş ayarlar veya Custom Scripts.</li>
-              <li><strong>3.</strong> Script'i <code className="rounded bg-blue-100 px-1 dark:bg-blue-900/30">&lt;head&gt;</code> bölümüne veya <strong>Storefront Events</strong> alanına yapıştırın.</li>
-              <li><strong>4.</strong> Mağazanızda sepete ürün ekleyerek test edin. Event'ler otomatik olarak Profiqo'ya iletilir.</li>
+              <li><strong>Otomatik:</strong> Yukarıdaki <strong>"Mağazaya Yükle"</strong> butonunu kullanarak script'i otomatik olarak ikas mağazanıza yükleyin.</li>
+              <li><strong>Manuel 1:</strong> Script tag'i kopyalayın → ikas admin paneli → <strong>Online Mağaza</strong> → <strong>Tema Düzenle</strong> → Custom Scripts.</li>
+              <li><strong>Manuel 2:</strong> Script'i <code className="rounded bg-blue-100 px-1 dark:bg-blue-900/30">&lt;head&gt;</code> bölümüne yapıştırın.</li>
+              <li><strong>Test:</strong> Mağazanızda sepete ürün ekleyerek test edin. Event'ler otomatik olarak Profiqo'ya iletilir.</li>
             </ol>
           </div>
         </>
