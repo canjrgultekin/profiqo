@@ -52,9 +52,10 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         var credsJson = _secrets.Unprotect(conn.AccessToken);
         var creds = JsonSerializer.Deserialize<TrendyolCreds>(credsJson) ?? throw new InvalidOperationException("Trendyol credentials invalid.");
 
-        var cursorRaw = await _cursors.GetAsync(tenantId, connId, CursorKey, ct);
-        long? cursorMs = long.TryParse(cursorRaw, out var c) && c > 0 ? c : null;
-
+        //var cursorRaw = await _cursors.GetAsync(tenantId, connId, CursorKey, ct);
+        //long? cursorMs = long.TryParse(cursorRaw, out var c) && c > 0 ? c : null;
+        var endDate = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var startDate = DateTimeOffset.UtcNow.AddDays(-60).ToUnixTimeMilliseconds();
         var endMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var startMsDefault = DateTimeOffset.UtcNow.AddDays(-_opts.BackfillDays).ToUnixTimeMilliseconds();
         var startMs = cursorMs ?? startMsDefault;
