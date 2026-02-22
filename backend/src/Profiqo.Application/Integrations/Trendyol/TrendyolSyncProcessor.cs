@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿// Path: backend/src/Profiqo.Application/Integrations/Trendyol/TrendyolSyncProcessor.cs
+using System.Text.Json;
 
 using Microsoft.Extensions.Options;
 
@@ -13,14 +14,11 @@ namespace Profiqo.Application.Integrations.Trendyol;
 
 public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
 {
-    private const string CursorKey = "trendyol.orders.cursor.lastOrderDateMs";
-
     private readonly IProviderConnectionRepository _connections;
     private readonly ISecretProtector _secrets;
     private readonly ITrendyolClient _client;
     private readonly ITrendyolSyncStore _store;
     private readonly IIntegrationJobRepository _jobs;
-    private readonly IIntegrationCursorRepository _cursors;
     private readonly TrendyolOptions _opts;
 
     public TrendyolSyncProcessor(
@@ -29,7 +27,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         ITrendyolClient client,
         ITrendyolSyncStore store,
         IIntegrationJobRepository jobs,
-        IIntegrationCursorRepository cursors,
         IOptions<TrendyolOptions> opts)
     {
         _connections = connections;
@@ -37,7 +34,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         _client = client;
         _store = store;
         _jobs = jobs;
-        _cursors = cursors;
         _opts = opts.Value;
     }
 
@@ -67,7 +63,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
         var safeMaxPages = maxPages <= 0 ? _opts.DefaultMaxPages : maxPages;
 
         var processed = 0;
-        long maxSeenOrderDate = startMs;
 
         for (var page = 0; page < safeMaxPages; page++)
         {
@@ -97,11 +92,12 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 var shipmentPackageId =
                     ReadStringOrNumber(o, "shipmentPackageId") ??
                     ReadStringOrNumber(o, "id") ??
-                    Guid.NewGuid().ToString("N");
+                    ReadStringOrNumber(o, "orderNumber");
 
                 var orderNumber =
                     ReadStringOrNumber(o, "orderNumber") ??
-                    shipmentPackageId;
+                    shipmentPackageId ??
+                    "NA";
 
                 var orderStatus =
                     ReadString(o, "status") ??
@@ -109,8 +105,6 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                     ReadString(o, "shipmentPackageStatusName");
 
                 var orderDateMs = ReadInt64(o, "orderDate") ?? startMs;
-                if (orderDateMs > maxSeenOrderDate) maxSeenOrderDate = orderDateMs;
-
                 var orderDateUtc = DateTimeOffset.FromUnixTimeMilliseconds(orderDateMs);
 
                 var currency = ReadString(o, "currencyCode") ?? "TRY";
@@ -205,14 +199,37 @@ public sealed class TrendyolSyncProcessor : ITrendyolSyncProcessor
                 break;
         }
 
-        // Cursor: +1 yapmıyoruz, boundary tekrar gelebilir ama upsert idempotent olduğu için veri kaçırmayız.
-        var nextCursor = maxSeenOrderDate > 0 ? maxSeenOrderDate : endMs;
-        await _cursors.UpsertAsync(tenantId, connId, CursorKey, nextCursor.ToString(), DateTimeOffset.UtcNow, ct);
-
         return processed;
     }
 
     private sealed record TrendyolCreds(string ApiKey, string ApiSecret, string UserAgent);
+
+    private static (long startMs, long endMs) ComputeIstanbulWindowMs(int daysBack)
+    {
+        var tz = GetIstanbulTimeZone();
+        var nowTr = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+
+        // Başlangıç: 60 gün önce Istanbul 00:00:00
+        var startTr = new DateTimeOffset(nowTr.Date, nowTr.Offset).AddDays(-daysBack);
+
+        var startMs = startTr.ToUnixTimeMilliseconds();
+        var endMs = nowTr.ToUnixTimeMilliseconds();
+
+        if (endMs <= startMs)
+            endMs = startMs + 1;
+
+        return (startMs, endMs);
+    }
+
+    private static TimeZoneInfo GetIstanbulTimeZone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul"); } // Linux
+        catch
+        {
+            try { return TimeZoneInfo.FindSystemTimeZoneById("Turkey Standard Time"); } // Windows
+            catch { return TimeZoneInfo.Utc; }
+        }
+    }
 
     private static TrendyolAddressDto ParseAddress(JsonElement a)
     {

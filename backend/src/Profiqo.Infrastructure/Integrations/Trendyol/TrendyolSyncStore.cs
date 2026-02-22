@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿// Path: backend/src/Profiqo.Infrastructure/Integrations/Trendyol/TrendyolSyncStore.cs
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -14,7 +15,7 @@ using Profiqo.Infrastructure.Persistence;
 
 namespace Profiqo.Infrastructure.Integrations.Trendyol;
 
-internal sealed class TrendyolSyncStore : ITrendyolSyncStore
+public sealed class TrendyolSyncStore : ITrendyolSyncStore
 {
     private readonly ProfiqoDbContext _db;
 
@@ -38,9 +39,12 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
         if (!string.IsNullOrWhiteSpace(model.CustomerFirstName) || !string.IsNullOrWhiteSpace(model.CustomerLastName))
             customer.SetName(model.CustomerFirstName, model.CustomerLastName, now);
 
+        // Deterministik providerOrderId: shipmentPackageId -> orderNumber -> payload hash
         var providerOrderId = (model.ShipmentPackageId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(providerOrderId))
-            providerOrderId = Guid.NewGuid().ToString("N");
+            providerOrderId = (model.OrderNumber ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(providerOrderId))
+            providerOrderId = Sha256Hex(model.PayloadJson ?? string.Empty);
 
         var channel = SalesChannel.Trendyol;
 
@@ -72,7 +76,6 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
             fullName = model.BillingAddress?.FullName
         });
 
-        // Eğer order daha önce kaydedildiyse, mükerrer yaratma; ama provider status ve adres snapshot güncellenebilir
         var existing = await _db.Orders
             .FirstOrDefaultAsync(x =>
                 x.TenantId == tenantId &&
@@ -81,9 +84,15 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
 
         if (existing is not null)
         {
+            // Mükerrer yaratma yok, sadece güncelle.
             existing.SetProviderOrderStatus(model.OrderStatus, now);
+
             _db.Entry(existing).Property("ShippingAddressJson").CurrentValue = shipJson;
             _db.Entry(existing).Property("BillingAddressJson").CurrentValue = billJson;
+
+            // İstersen payload snapshot da güncel kalsın (kolon varsa).
+            // _db.Entry(existing).Property("PayloadJson").CurrentValue = model.PayloadJson;
+
             await _db.SaveChangesAsync(ct);
             return;
         }
@@ -103,7 +112,7 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
                 var sku = string.IsNullOrWhiteSpace(l.Sku) ? "NA" : l.Sku.Trim();
                 var name = string.IsNullOrWhiteSpace(l.ProductName) ? "unknown" : l.ProductName.Trim();
 
-                var productCategory = string.IsNullOrWhiteSpace(l.ProductCategoryId) ? null : l.ProductCategoryId.Trim(); // Trendyol: ID
+                var productCategory = string.IsNullOrWhiteSpace(l.ProductCategoryId) ? null : l.ProductCategoryId.Trim();
                 var barcode = string.IsNullOrWhiteSpace(l.Barcode) ? null : l.Barcode.Trim();
                 var statusName = string.IsNullOrWhiteSpace(l.OrderLineItemStatusName) ? null : l.OrderLineItemStatusName.Trim();
 
@@ -170,6 +179,7 @@ internal sealed class TrendyolSyncStore : ITrendyolSyncStore
             return customer;
         }
 
+        // Bulunan müşteri tracked olmalı, yoksa alttaki mutasyonlar DB’ye yazmayabilir.
         if (!string.IsNullOrWhiteSpace(emailHash))
             customer.AddOrTouchIdentity(CustomerIdentity.Create(tenantId, IdentityType.Email, new IdentityHash(emailHash), null, ProviderType.Trendyol, null, nowUtc), nowUtc);
 
@@ -190,9 +200,9 @@ JOIN public.customer_identities i ON i.customer_id = c.id
 WHERE c.tenant_id = {0} AND i.tenant_id = {0} AND i.type = {1} AND i.value_hash = {2}
 LIMIT 1";
 
+        // AsNoTracking kaldırıldı, aksi halde customer üstündeki değişiklikler persist olmayabilir.
         return await _db.Customers
             .FromSqlRaw(sql, tenantGuid, identityType, valueHash)
-            .AsNoTracking()
             .FirstOrDefaultAsync(ct);
     }
 

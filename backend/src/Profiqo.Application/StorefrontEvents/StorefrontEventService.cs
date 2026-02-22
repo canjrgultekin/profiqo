@@ -1,3 +1,4 @@
+// Path: backend/src/Profiqo.Application/StorefrontEvents/StorefrontEventService.cs
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,12 +6,10 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 using Profiqo.Application.Abstractions.Crypto;
-using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Application.Customers.IdentityResolution;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Customers;
 using Profiqo.Domain.Integrations;
-using Profiqo.Domain.StorefrontEvents;
 
 namespace Profiqo.Application.StorefrontEvents;
 
@@ -31,6 +30,7 @@ public sealed class StorefrontEventService : IStorefrontEventService
     private readonly IWebEventRepository _webEvents;
     private readonly IIdentityResolutionService _identityResolution;
     private readonly ISecretProtector _secrets;
+    private readonly IStorefrontCheckoutProjector _checkoutProjector;
     private readonly ILogger<StorefrontEventService> _logger;
 
     private static readonly HashSet<string> SupportedEventTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -49,11 +49,13 @@ public sealed class StorefrontEventService : IStorefrontEventService
         IWebEventRepository webEvents,
         IIdentityResolutionService identityResolution,
         ISecretProtector secrets,
+        IStorefrontCheckoutProjector checkoutProjector,
         ILogger<StorefrontEventService> logger)
     {
         _webEvents = webEvents;
         _identityResolution = identityResolution;
         _secrets = secrets;
+        _checkoutProjector = checkoutProjector;
         _logger = logger;
     }
 
@@ -72,7 +74,6 @@ public sealed class StorefrontEventService : IStorefrontEventService
         var inserts = new List<WebEventInsert>();
         var nowUtc = DateTimeOffset.UtcNow;
 
-        // Customer resolution — email/phone ile mevcut müşteri eşleştir veya yeni oluştur
         Guid? resolvedCustomerId = null;
         if (customer is not null && !customer.IsGuest && HasIdentifiable(customer))
         {
@@ -83,9 +84,10 @@ public sealed class StorefrontEventService : IStorefrontEventService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Storefront customer resolution failed for tenant {TenantId}", tenantId);
-                // Resolution hatası event ingestion'ı engellemez
             }
         }
+
+        var checkoutProjections = new List<(Guid? customerId, string eventDataJson, DateTimeOffset occurredAtUtc)>();
 
         foreach (var evt in events)
         {
@@ -96,31 +98,45 @@ public sealed class StorefrontEventService : IStorefrontEventService
                 continue;
             }
 
-            // Event-level customer override (COMPLETE_CHECKOUT'ta sipariş sahibi farklı olabilir)
+            // Event-level customer override
             var eventCustomerId = resolvedCustomerId;
-            if (evt.Customer is not null && HasIdentifiable(evt.Customer) && !evt.Customer.IsGuest)
+            StorefrontCustomerContext? effectiveCustomer = customer;
+
+            if (evt.Customer is not null)
             {
-                try
+                effectiveCustomer = evt.Customer;
+
+                if (!evt.Customer.IsGuest && HasIdentifiable(evt.Customer))
                 {
-                    eventCustomerId = await ResolveCustomerAsync(tenantId, evt.Customer, nowUtc, ct);
+                    try
+                    {
+                        eventCustomerId = await ResolveCustomerAsync(tenantId, evt.Customer, nowUtc, ct);
+                    }
+                    catch
+                    {
+                        // ignore, batch resolvedCustomerId kalır
+                    }
                 }
-                catch { /* batch-level customer'ı kullan */ }
             }
 
-            // Event data — customer bilgisini de ekle
+            // ✅ EventData içine yazacağımız _customer, effectiveCustomer olmalı (evt.Customer varsa onu bas)
             var eventDataObj = new Dictionary<string, object?>(evt.Data ?? []);
-            if (customer is not null)
+
+            if (effectiveCustomer is not null)
             {
                 eventDataObj["_customer"] = new
                 {
-                    customer.Id,
-                    customer.Email,
-                    customer.FirstName,
-                    customer.LastName,
-                    customer.Phone,
-                    customer.IsGuest
+                    effectiveCustomer.Id,
+                    effectiveCustomer.Email,
+                    effectiveCustomer.FirstName,
+                    effectiveCustomer.LastName,
+                    effectiveCustomer.Phone,
+                    effectiveCustomer.IsGuest
                 };
             }
+
+            var eventDataJson = JsonSerializer.Serialize(eventDataObj, JsonOpts);
+            var occurredAt = evt.OccurredAt?.ToUniversalTime() ?? nowUtc;
 
             var insert = new WebEventInsert
             {
@@ -136,18 +152,31 @@ public sealed class StorefrontEventService : IStorefrontEventService
                 PageReferrer = evt.Page?.Referrer,
                 PageTitle = evt.Page?.Title,
                 UserAgent = evt.Page?.UserAgent,
-                EventDataJson = JsonSerializer.Serialize(eventDataObj, JsonOpts),
-                OccurredAtUtc = evt.OccurredAt?.ToUniversalTime() ?? nowUtc,
+                EventDataJson = eventDataJson,
+                OccurredAtUtc = occurredAt,
                 CreatedAtUtc = nowUtc
             };
 
             inserts.Add(insert);
             accepted++;
+
+            if (insert.EventType == "COMPLETE_CHECKOUT")
+                checkoutProjections.Add((eventCustomerId, eventDataJson, occurredAt));
         }
 
         if (inserts.Count > 0)
-        {
             await _webEvents.InsertBatchAsync(inserts, ct);
+
+        foreach (var p in checkoutProjections)
+        {
+            try
+            {
+                await _checkoutProjector.ProjectCompleteCheckoutAsync(tenantId, p.customerId, p.eventDataJson, p.occurredAtUtc, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Checkout projection failed. Tenant={TenantId}", tenantId);
+            }
         }
 
         return new StorefrontEventBatchResponse

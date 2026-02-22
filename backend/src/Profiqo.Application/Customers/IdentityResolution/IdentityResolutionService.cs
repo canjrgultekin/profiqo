@@ -1,4 +1,5 @@
-﻿using Profiqo.Application.Abstractions.Crypto;
+﻿// Path: backend/src/Profiqo.Application/Customers/IdentityResolution/IdentityResolutionService.cs
+using Profiqo.Application.Abstractions.Crypto;
 using Profiqo.Application.Abstractions.Persistence.Repositories;
 using Profiqo.Domain.Common.Ids;
 using Profiqo.Domain.Customers;
@@ -43,53 +44,39 @@ internal sealed class IdentityResolutionService : IIdentityResolutionService
         DateTimeOffset nowUtc,
         CancellationToken ct)
     {
-        // Deterministic matching order: Email -> Phone
-        Customer? existing = null;
+        // ✅ Deterministic matching: Email -> Phone
+        // ✅ KRİTİK: mevcut müşteri bulunduysa Customer entity materialize ETMİYORUZ, sadece CustomerId dönüyoruz.
+        // Poison customer row yüzünden ingestion çökmeyecek.
+
+        CustomerId? existingId = null;
 
         var email = identities.FirstOrDefault(x => x.Type == IdentityType.Email);
         if (email is not null)
-            existing = await _customers.FindByIdentityHashAsync(tenantId, IdentityType.Email, email.Hash, ct);
+            existingId = await _customers.FindIdByIdentityHashAsync(tenantId, IdentityType.Email, email.Hash, ct);
 
-        if (existing is null)
+        if (existingId is null)
         {
             var phone = identities.FirstOrDefault(x => x.Type == IdentityType.Phone);
             if (phone is not null)
-                existing = await _customers.FindByIdentityHashAsync(tenantId, IdentityType.Phone, phone.Hash, ct);
+                existingId = await _customers.FindIdByIdentityHashAsync(tenantId, IdentityType.Phone, phone.Hash, ct);
         }
 
-        if (existing is null)
-        {
-            var created = Customer.Create(tenantId, nowUtc);
+        if (existingId is not null)
+            return existingId.Value;
 
-            var fn = NormalizeNameTokenOrNull(firstName);
-            var ln = NormalizeNameTokenOrNull(lastName);
-            if (fn is not null || ln is not null)
-                created.SetName(fn, ln, nowUtc);
+        // ✅ Create new customer
+        var created = Customer.Create(tenantId, nowUtc);
 
-            foreach (var i in identities)
-                AddIdentity(created, tenantId, i, nowUtc);
-
-            await _customers.AddAsync(created, ct);
-            return created.Id;
-        }
-
-        // Update name if needed (non-destructive, field-level)
-        var inFirst = NormalizeNameTokenOrNull(firstName);
-        var inLast = NormalizeNameTokenOrNull(lastName);
-
-        if (inFirst is not null || inLast is not null)
-        {
-            var nextFirst = inFirst ?? existing.FirstName;
-            var nextLast = inLast ?? existing.LastName;
-
-            if (nextFirst != existing.FirstName || nextLast != existing.LastName)
-                existing.SetName(nextFirst, nextLast, nowUtc);
-        }
+        var fn = NormalizeNameTokenOrNull(firstName);
+        var ln = NormalizeNameTokenOrNull(lastName);
+        if (fn is not null || ln is not null)
+            created.SetName(fn, ln, nowUtc);
 
         foreach (var i in identities)
-            AddIdentity(existing, tenantId, i, nowUtc);
+            AddIdentity(created, tenantId, i, nowUtc);
 
-        return existing.Id;
+        await _customers.AddAsync(created, ct);
+        return created.Id;
     }
 
     private static string? NormalizeNameTokenOrNull(string? value)

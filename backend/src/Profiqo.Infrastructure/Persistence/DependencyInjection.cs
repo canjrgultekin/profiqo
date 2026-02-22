@@ -16,6 +16,7 @@ using Profiqo.Infrastructure.Integrations.Trendyol;
 using Profiqo.Infrastructure.Persistence.Interceptors;
 using Profiqo.Infrastructure.Persistence.Repositories;
 using Profiqo.Infrastructure.Services;
+using Profiqo.Infrastructure.StorefrontEvents;
 
 namespace Profiqo.Infrastructure.Persistence;
 
@@ -87,7 +88,7 @@ public static class DependencyInjection
             Profiqo.Infrastructure.Persistence.Repositories.WhatsappJobRepository>();
         services.AddScoped<Profiqo.Application.Abstractions.Persistence.WhatsappAutomation.IWhatsappDispatchRepository,
             Profiqo.Infrastructure.Persistence.Repositories.WhatsappDispatchRepository>();
-        
+       services.AddStorefrontEventProjection();
 
         return services;
     }
