@@ -1,0 +1,6 @@
+@Profiqo.Api_HostAddress = http://localhost:5164
+
+GET {{Profiqo.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

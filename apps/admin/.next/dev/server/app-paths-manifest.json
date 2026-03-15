@@ -1,0 +1,8 @@
+{
+  "/(dashboard)/integrations/trendyol/page": "app/(dashboard)/integrations/trendyol/page.js",
+  "/(dashboard)/orders/page": "app/(dashboard)/orders/page.js",
+  "/(dashboard)/customers/page": "app/(dashboard)/customers/page.js",
+  "/(dashboard)/customers/[customerId]/page": "app/(dashboard)/customers/[customerId]/page.js",
+  "/(dashboard)/orders/[orderId]/page": "app/(dashboard)/orders/[orderId]/page.js",
+  "/auth/sign-in/page": "app/auth/sign-in/page.js"
+}

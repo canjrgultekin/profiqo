@@ -1,0 +1,28 @@
+{
+  "profiles": {
+    "CustomerReseed": {
+      "commandName": "Project", 
+      "environmentVariables": {
+        "MODE": "FULL_LOCAL",
+        "PG_CONN": "Host=localhost;Port=5432;Database=crm_db;Username=postgres;Password=YOUR_PG_PASSWORD;Pooling=true;Maximum Pool Size=50",
+        "CB_CONN": "couchbases://YOUR_COUCHBASE_HOST",
+        "CB_USER": "YOUR_CB_USER",
+        "CB_PASS": "YOUR_CB_PASSWORD",
+        "CB_BUCKET": "crm_customers",
+        "CB_SCOPE": "crm",
+        "CB_COLLECTION": "customers_unified",
+        "OUT_DIR": "./batch-data",
+        "EMBEDDING_MODEL": "text-embedding-3-small",
+        "EMBEDDING_DIMS": "512",
+        "PG_READ_BATCH": "5000",
+        "DOCS_CONCURRENCY": "24",
+        "EMBEDDINGS_CONCURRENCY": "32",
+        "CB_KV_TIMEOUT_SECONDS": "10",
+        "PROGRESS_EVERY": "10000",
+        "MISSING_DOCS_LOG": "missing_docids.log",
+        "FAILED_DOCS_LOG": "failed_docs.log",
+        "FAILED_EMBEDS_LOG": "failed_embeds.log"
+      }
+    }
+  }
+}

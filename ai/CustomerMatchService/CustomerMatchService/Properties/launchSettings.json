@@ -1,0 +1,29 @@
+﻿{
+  "profiles": {
+    "CustomerMatchService": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "CB_CONN": "couchbases://YOUR_COUCHBASE_HOST",
+        "CB_USER": "YOUR_CB_USER",
+        "CB_PASS": "YOUR_CB_PASSWORD",
+        "CB_BUCKET": "crm_customers",
+        "CB_SCOPE": "crm",
+        "CB_COLLECTION": "customers_unified",
+        "CB_FTS_BASEURL": "https://YOUR_COUCHBASE_HOST:18094",
+        "CB_FTS_INDEX": "crm_customers.crm.customers-fts-vector",
+        "CB_FTS_TIMEOUT_SECONDS": "10",
+        "CB_QUERY_TIMEOUT_SECONDS": "60",
+        "OPENAI_API_KEY": "sk-proj-YOUR_OPENAI_API_KEY",
+        "OPENAI_BASE_URL": "https://api.openai.com",
+        "OPENAI_EMBEDDING_MODEL": "text-embedding-3-small",
+        "OPENAI_EMBEDDING_DIMS": "512",
+        "OPENAI_TIMEOUT_SECONDS": "20",
+        "MATCH_MIN_SCORE": "0.70",
+        "MATCH_TOP1_ONLY_SCORE": "0.95",
+        "MATCH_TOP3_SCORE": "0.85",
+        "MATCH_MAX_TOPK": "5",
+        "VECTOR_CANDIDATE_POOL": "20"
+      }
+    }
+  }
+}

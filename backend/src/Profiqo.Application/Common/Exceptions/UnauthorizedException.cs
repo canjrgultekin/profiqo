@@ -1,0 +1,9 @@
+﻿namespace Profiqo.Application.Common.Exceptions;
+
+public sealed class UnauthorizedException : AppException
+{
+    public UnauthorizedException(string message)
+        : base("unauthorized", message)
+    {
+    }
+}

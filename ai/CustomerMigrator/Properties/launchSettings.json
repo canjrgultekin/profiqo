@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "CustomerMigrator": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "PG_CONN": "Host=localhost;Port=5432;Database=crm_db;Username=postgres;Password=YOUR_PG_PASSWORD;Pooling=true;Maximum Pool Size=50",
+        "CB_CONN": "couchbases://YOUR_COUCHBASE_HOST",
+        "CB_USER": "YOUR_CB_USER",
+        "CB_PASS": "YOUR_CB_PASSWORD",
+        "CB_BUCKET": "crm_customers",
+        "CB_SCOPE": "crm",
+        "CB_COLLECTION": "customers_unified",
+        "BATCH_SIZE": "5000",
+        "MAX_CONCURRENCY": "24",
+        "CB_KV_TIMEOUT_SECONDS": "10",
+        "PROGRESS_EVERY": "10000",
+        "FAILED_LOG": "failed_docids.log",
+        "DRY_RUN": "false",
+        "SKIP_DELETE": "false"
+      }
+    }
+  }
+}

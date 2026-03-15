@@ -1,0 +1,13 @@
+{
+    "search.useParentIgnoreFiles": false,
+    "search.useGlobalIgnoreFiles": false,
+    "search.useIgnoreFiles": false,
+    "files.autoSave": "onFocusChange",
+    "notebook.find.filters": {
+
+        "markupSource": true,
+        "markupPreview": true,
+        "codeSource": true,
+        "codeOutput": true
+    }
+}
